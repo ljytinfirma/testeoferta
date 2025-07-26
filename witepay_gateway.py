@@ -64,10 +64,12 @@ class WitePayGateway:
             )
             
             current_app.logger.info(f"WitePay order response status: {response.status_code}")
+            current_app.logger.debug(f"Order response text: {response.text}")
             
             if response.status_code == 200 or response.status_code == 201:
                 order_data = response.json()
                 current_app.logger.info(f"Pedido criado com sucesso: {order_data.get('orderId', 'N/A')}")
+                current_app.logger.debug(f"Full order data: {order_data}")
                 return {
                     'success': True,
                     'orderId': order_data.get('orderId'),
@@ -123,16 +125,26 @@ class WitePayGateway:
             )
             
             current_app.logger.info(f"WitePay charge response status: {response.status_code}")
+            current_app.logger.debug(f"Charge response text: {response.text}")
             
             if response.status_code == 200 or response.status_code == 201:
                 charge_data = response.json()
                 current_app.logger.info(f"Cobrança PIX criada com sucesso")
+                current_app.logger.debug(f"Charge response data: {charge_data}")
+                
+                # Extract PIX data with correct field names from WitePay API
+                pix_qr_code = charge_data.get('qrCode')  # WitePay returns as 'qrCode'
+                pix_copy_paste = charge_data.get('qrCode')  # Use QR code as copy-paste since WitePay doesn't provide separate field
+                charge_id = charge_data.get('chargeId')  # WitePay returns as 'chargeId'
+                
+                current_app.logger.info(f"Extracted data - QR: {bool(pix_qr_code)}, Copy: {bool(pix_copy_paste)}, ID: {charge_id}")
+                
                 return {
                     'success': True,
-                    'charge_id': charge_data.get('id'),
-                    'pix_qr_code': charge_data.get('qr_code'),
-                    'pix_copy_paste': charge_data.get('copy_paste'),
-                    'expires_at': charge_data.get('expires_at'),
+                    'charge_id': charge_id,
+                    'pix_qr_code': pix_qr_code,
+                    'pix_copy_paste': pix_copy_paste,
+                    'expires_at': charge_data.get('expiresAt'),  # WitePay uses camelCase
                     'data': charge_data
                 }
             else:
@@ -181,8 +193,8 @@ class WitePayGateway:
                     'error': 'CPF deve conter 11 dígitos'
                 }
             
-            # Convert amount to centavos
-            amount_centavos = int(float(amount) * 100)
+            # Convert amount to centavos (round to handle floating point precision)
+            amount_centavos = round(float(amount) * 100)
             
             # Prepare client data
             client_data = {
