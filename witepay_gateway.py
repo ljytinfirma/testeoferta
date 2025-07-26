@@ -11,8 +11,11 @@ class WitePayGateway:
     """
     
     def __init__(self):
-        self.api_key = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+        self.api_key = os.environ.get('WITEPAY_API_KEY')
         self.api_base_url = "https://api.witepay.com.br/v1"
+        
+        if not self.api_key:
+            raise ValueError("WITEPAY_API_KEY environment variable is required")
         
         if current_app:
             current_app.logger.info("WitePay gateway inicializado com sucesso")
