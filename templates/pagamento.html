@@ -40,6 +40,17 @@
       src="https://www.facebook.com/tr?id=1226790281278977&ev=PageView&noscript=1"/>
     </noscript>
     <!-- End Facebook Pixel Code -->
+    
+    <!-- UTMFY Google Pixel -->
+    <script>
+      window.googlePixelId = "6859ccee5af20eab22a408ef";
+      var a = document.createElement("script");
+      a.setAttribute("async", "");
+      a.setAttribute("defer", "");
+      a.setAttribute("src", "https://cdn.utmify.com.br/scripts/pixel/pixel-google.js");
+      document.head.appendChild(a);
+    </script>
+    <!-- End UTMFY Google Pixel -->
     <style>
         .gov-header {
             background-color: #222222;
@@ -772,6 +783,27 @@
                     
                     console.log('PAGAMENTO VERIFICADO COMO PAGO!');
                     console.log('Redirecionando para a página de agradecimento...');
+                    
+                    // Trigger UTMFY Google Pixel conversion event if available
+                    if (data.utmfy_conversion && window.googlePixelId) {
+                        console.log('Acionando conversão UTMFY Google Pixel para pagamento confirmado');
+                        try {
+                            // UTMFY conversion event
+                            if (window.gtag) {
+                                window.gtag('event', 'purchase', {
+                                    'transaction_id': data.charge_id || data.transaction_id,
+                                    'value': data.amount || 93.40,
+                                    'currency': 'BRL',
+                                    'event_category': 'ecommerce',
+                                    'custom_parameter_1': 'ENCCEJA_2025_Payment'
+                                });
+                                console.log('Evento de conversão UTMFY enviado com sucesso');
+                            }
+                        } catch (e) {
+                            console.error('Erro ao enviar evento UTMFY:', e);
+                        }
+                    }
+                    
                     // Marcar como confirmado para parar as verificações
                     paymentConfirmed = true;
                     console.log('PAGAMENTO APROVADO! Preparando redirecionamento...');

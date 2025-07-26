@@ -9,6 +9,7 @@ import http.client
 import subprocess
 import logging
 import urllib.parse
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, abort
 import secrets
 import qrcode
@@ -22,6 +23,9 @@ from for4payments import create_payment_api
 from pagamentocomdesconto import create_payment_with_discount_api
 
 app = Flask(__name__)
+
+# In-memory store for payment status (in production, use Redis or database)
+payment_status_store = {}
 
 # Domínio autorizado - Permitindo todos os domínios
 AUTHORIZED_DOMAIN = "*"
@@ -1194,13 +1198,59 @@ def verificar_pagamento():
         
         # Check if it's a WitePay transaction (starts with 'ch_')
         if transaction_id.startswith('ch_'):
-            # For WitePay, we return pending status since we don't have status check API
-            # In a real implementation, you would call WitePay's status check endpoint
-            app.logger.info(f"[WITEPAY] Simulando verificação de status para: {transaction_id}")
-            status_result = {
-                'status': 'pending',
-                'message': 'Aguardando confirmação do pagamento'
-            }
+            app.logger.info(f"[WITEPAY] Verificando status para: {transaction_id}")
+            
+            # Check if we have a postback status stored in session
+            session_key = f'payment_status_{transaction_id}'
+            app.logger.debug(f"[WITEPAY] Procurando chave de sessão: {session_key}")
+            app.logger.debug(f"[WITEPAY] Chaves disponíveis na sessão: {list(session.keys())}")
+            
+            # Check both session and in-memory store
+            payment_data = None
+            if session_key in session:
+                payment_data = session[session_key]
+                app.logger.info(f"[WITEPAY] Dados encontrados na sessão: {payment_data}")
+            elif transaction_id in payment_status_store:
+                payment_data = payment_status_store[transaction_id]
+                app.logger.info(f"[WITEPAY] Dados encontrados no store: {payment_data}")
+            
+            if payment_data:
+                status = payment_data.get('status', 'pending')
+                
+                if status == 'paid':
+                    app.logger.info(f"[WITEPAY] Pagamento confirmado via postback: {transaction_id}")
+                    
+                    # Trigger Google UTMFY pixel conversion event
+                    status_result = {
+                        'status': 'completed',
+                        'message': 'Pagamento confirmado!',
+                        'charge_id': payment_data.get('charge_id'),
+                        'order_id': payment_data.get('order_id'),
+                        'transaction_id': payment_data.get('transaction_id'),
+                        'amount': payment_data.get('amount'),
+                        'confirmed_at': payment_data.get('confirmed_at'),
+                        'utmfy_conversion': True  # Flag to trigger UTMFY pixel
+                    }
+                elif status == 'failed':
+                    app.logger.info(f"[WITEPAY] Pagamento falhado via postback: {transaction_id}")
+                    status_result = {
+                        'status': 'failed',
+                        'message': f"Pagamento não processado: {payment_data.get('reason', 'Motivo não especificado')}",
+                        'charge_id': payment_data.get('charge_id')
+                    }
+                else:
+                    # Still pending
+                    status_result = {
+                        'status': 'pending',
+                        'message': 'Aguardando confirmação do pagamento',
+                        'charge_id': payment_data.get('charge_id')
+                    }
+            else:
+                # No postback received yet, still pending
+                status_result = {
+                    'status': 'pending',
+                    'message': 'Aguardando confirmação do pagamento'
+                }
         else:
             # Usar a API FOR4 para outros tipos de transação
             from for4payments import create_payment_api as create_for4_api
@@ -1226,6 +1276,76 @@ def verificar_pagamento():
     except Exception as e:
         app.logger.error(f"[PROD] Erro ao verificar status do pagamento: {str(e)}")
         return jsonify({'error': f'Erro ao verificar status: {str(e)}', 'status': 'pending'}), 200
+
+@app.route('/witepay-postback', methods=['POST'])
+def witepay_postback():
+    """
+    WitePay postback endpoint to receive payment status updates
+    This endpoint validates payment status and triggers Google UTMFY pixel events
+    """
+    try:
+        data = request.get_json()
+        app.logger.info(f"[WITEPAY_POSTBACK] Received data: {data}")
+        
+        # Extract payment information from WitePay postback
+        charge_id = data.get('chargeId')
+        order_id = data.get('orderId')
+        status = data.get('status')
+        transaction_id = data.get('transactionId')
+        amount = data.get('amount')
+        
+        if not charge_id:
+            app.logger.error("[WITEPAY_POSTBACK] Missing chargeId in postback")
+            return jsonify({'error': 'chargeId is required'}), 400
+        
+        app.logger.info(f"[WITEPAY_POSTBACK] Processing payment update - Charge: {charge_id}, Status: {status}")
+        
+        # Process payment status
+        if status in ['PAID', 'COMPLETED', 'APPROVED']:
+            app.logger.info(f"[WITEPAY_POSTBACK] Payment confirmed for charge: {charge_id}")
+            
+            # Store payment confirmation for frontend polling
+            # Using both session and in-memory store for reliability
+            payment_data = {
+                'status': 'paid',
+                'charge_id': charge_id,
+                'order_id': order_id,
+                'transaction_id': transaction_id,
+                'amount': amount,
+                'confirmed_at': datetime.now().isoformat()
+            }
+            session[f'payment_status_{charge_id}'] = payment_data
+            payment_status_store[charge_id] = payment_data
+            
+            # Log for Google UTMFY pixel tracking
+            app.logger.info(f"[UTMFY_GOOGLE_PIXEL] Payment conversion - Charge: {charge_id}, Amount: {amount}")
+            
+        elif status in ['PENDING', 'PROCESSING']:
+            app.logger.info(f"[WITEPAY_POSTBACK] Payment pending for charge: {charge_id}")
+            payment_data = {
+                'status': 'pending',
+                'charge_id': charge_id,
+                'order_id': order_id
+            }
+            session[f'payment_status_{charge_id}'] = payment_data
+            payment_status_store[charge_id] = payment_data
+            
+        elif status in ['CANCELLED', 'FAILED', 'EXPIRED']:
+            app.logger.info(f"[WITEPAY_POSTBACK] Payment failed/cancelled for charge: {charge_id}")
+            payment_data = {
+                'status': 'failed',
+                'charge_id': charge_id,
+                'order_id': order_id,
+                'reason': status
+            }
+            session[f'payment_status_{charge_id}'] = payment_data
+            payment_status_store[charge_id] = payment_data
+        
+        return jsonify({'success': True, 'message': 'Postback processed successfully'}), 200
+        
+    except Exception as e:
+        app.logger.error(f"[WITEPAY_POSTBACK] Error processing postback: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/check-for4payments-status', methods=['GET', 'POST'])
 @check_referer
