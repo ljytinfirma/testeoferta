@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom CSS for ENCCEJA branding */
+@font-face {
+  font-family: 'CAIXAStd-Bold';
+  src: url('../fonts/CAIXAStd-Bold.woff') format('woff');
+  font-weight: bold;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'CAIXAStd-Book';
+  src: url('../fonts/CAIXAStd-Book.woff') format('woff');
+  font-weight: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'CAIXAStd-SemiBold';
+  src: url('../fonts/CAIXAStd-SemiBold.woff') format('woff');
+  font-weight: 600;
+  font-display: swap;
+}
+
+/* ENCCEJA Government Branding */
+.encceja-primary {
+  @apply bg-blue-600 text-white;
+}
+
+.encceja-secondary {
+  @apply bg-gray-100 text-gray-800;
+}
+
+.form-control {
+  @apply w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500;
+}
+
+.btn-primary {
+  @apply bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors duration-200;
+}
+
+.btn-secondary {
+  @apply bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded transition-colors duration-200;
+}
+
+/* Payment page specific styles */
+.payment-container {
+  @apply max-w-md mx-auto bg-white rounded-lg shadow-lg p-6;
+}
+
+.qr-code-container {
+  @apply flex justify-center items-center p-4 bg-gray-50 rounded-lg;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .payment-container {
+    @apply mx-4 p-4;
+  }
+}

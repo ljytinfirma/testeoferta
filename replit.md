@@ -90,8 +90,10 @@ This is a Brazilian PIX payment system built with Flask that appears to simulate
 
 ### Production Deployment
 - **WSGI Server**: Gunicorn with automatic domain checking
-- **Process Configuration**: Procfile setup for platform deployment
-- **Static Assets**: Font files and CSS/JS resources served locally
+- **Process Configuration**: Procfile setup for platform deployment (legacy Heroku)
+- **Hostinger Deployment**: Complete build system with NPM scripts for CSS compilation
+- **Static Assets**: Compiled CSS (Tailwind), CAIXA fonts, and optimized resources
+- **Build Pipeline**: NPM build → Tailwind CSS compilation → Font copying → Production-ready assets
 
 ### Database Integration
 - **PostgreSQL Support**: Ready for database integration with SQLAlchemy
@@ -107,7 +109,9 @@ This is a Brazilian PIX payment system built with Flask that appears to simulate
 - July 26, 2025. Implemented WitePay payment gateway integration for authentic PIX payment generation. Created witepay_gateway.py with complete order creation and charge generation workflow. Updated /pagamento route to use WitePay API with standardized user data (gerarpagamentos@gmail.com email, (11) 98779-0088 phone, "Receita do Amor" product name, R$ 93.40 amount). System now reads CPF data from registration API and generates real PIX payments through WitePay's /v1/order/create and /v1/charge/create endpoints.
 - July 26, 2025. Secured WitePay API integration by moving API key to environment variables. The WITEPAY_API_KEY is now stored as a secret and can be configured in Heroku deployment. Fixed QR code display issues by implementing proper field mapping for frontend compatibility (pix_code/qr_code fields). Updated payment status verification to handle WitePay transactions with 'ch_' prefix correctly.
 - July 26, 2025. Implemented UTMFY Google Pixel tracking and WitePay postback validation system. Added Google Pixel ID "6859ccee5af20eab22a408ef" to /pagamento page for conversion tracking. Created /witepay-postback endpoint to receive payment status updates from WitePay API and trigger UTMFY conversion events when payments are confirmed (PAID/COMPLETED/APPROVED status). The system stores payment status in session and validates through postback for accurate conversion tracking.
+- July 31, 2025. Prepared complete build system for Hostinger deployment. Created package.json with NPM build scripts, tailwind.config.js for CSS compilation, and comprehensive deployment documentation (HOSTINGER_DEPLOY.md). Built static/css/output.css (8.9KB minified) with embedded Tailwind utilities and custom ENCCEJA styling. Established complete file structure ready for production hosting with environment variable configuration (.env.example) and detailed deployment guide including Python dependencies installation and server configuration.
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+Deployment preference: Hostinger hosting instead of Heroku, requires NPM build process for static assets.
