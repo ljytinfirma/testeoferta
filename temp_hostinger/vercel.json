@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "main.py"
+    }
+  ],
+  "env": {
+    "WITEPAY_API_KEY": "@witepay-api-key",
+    "SESSION_SECRET": "@session-secret",
+    "GOOGLE_PIXEL_ID": "@google-pixel-id",
+    "FACEBOOK_PIXEL_IDS": "@facebook-pixel-ids"
+  }
+}
