@@ -146,13 +146,43 @@ def criar_pagamento_witepay_vps(amount: float, description: str = "Inscrição E
         
         charge_result = charge_response.json()
         
-        # Extrair dados do PIX
-        pix_code = charge_result.get('qrCode')
-        transaction_id = charge_result.get('chargeId') or charge_result.get('id') or order_id
+        # Extrair dados do PIX - estrutura corrigida baseada na resposta real da API
+        pix_code = charge_result.get('qrCode') or charge_result.get('pixCode') or charge_result.get('pix_code')
+        transaction_id = charge_result.get('chargeId') or charge_result.get('transactionId') or charge_result.get('id') or order_id
         
+        app.logger.info(f"[VPS] Dados da cobrança recebidos: {charge_result}")
+        
+        # Se não tem QR code, pode ser que precise de um passo adicional ou aguardar processamento
         if not pix_code:
-            app.logger.error(f"[VPS] Código PIX não encontrado: {charge_result}")
-            return {'success': False, 'error': 'Código PIX não encontrado'}
+            app.logger.warning(f"[VPS] QR Code vazio, tentando aguardar processamento...")
+            
+            # Tentar buscar o QR code novamente após breve espera
+            import time
+            time.sleep(2)
+            
+            # Fazer nova consulta para obter o QR code
+            try:
+                status_response = requests.get(
+                    f'https://api.witepay.com.br/v1/charge/{transaction_id}',
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if status_response.status_code == 200:
+                    status_result = status_response.json()
+                    pix_code = status_result.get('qrCode') or status_result.get('pixCode')
+                    app.logger.info(f"[VPS] QR Code obtido na segunda tentativa: {bool(pix_code)}")
+            except Exception as e:
+                app.logger.warning(f"[VPS] Erro ao tentar obter QR code novamente: {e}")
+        
+        # Se ainda não tem PIX code, retornar erro mais detalhado
+        if not pix_code:
+            app.logger.error(f"[VPS] Código PIX não encontrado após tentativas. Resposta completa: {charge_result}")
+            return {
+                'success': False, 
+                'error': 'Código PIX não gerado pela API - Verificar configuração WitePay',
+                'debug_info': charge_result
+            }
         
         app.logger.info(f"[VPS] Pagamento PIX criado com sucesso - ID: {transaction_id}")
         
