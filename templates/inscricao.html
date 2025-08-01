@@ -197,9 +197,9 @@
                     // Armazenar os dados retornados no localStorage para serem usados na próxima etapa
                     localStorage.setItem('cpfData', JSON.stringify(data));
                     
-                    // Redirecionar para a página de validação de dados
+                    // Redirecionar para a página de informações do ENCCEJA (primeira etapa do fluxo)
                     setTimeout(() => {
-                        window.location.href = '/validar-dados';
+                        window.location.href = '/encceja-info';
                     }, 1500);
                 })
                 .catch(error => {
