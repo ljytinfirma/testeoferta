@@ -118,7 +118,7 @@ def create_witepay_payment_direct(amount: float, description: str = "Inscrição
         
         # Passo 2: Criar cobrança PIX
         charge_data = {
-            "paymentMethod": "PIX",
+            "paymentMethod": "pix",
             "orderId": order_id
         }
         

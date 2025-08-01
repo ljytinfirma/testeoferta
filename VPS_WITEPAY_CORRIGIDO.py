@@ -63,7 +63,7 @@ def create_witepay_payment(amount: float, description: str = "Inscrição ENCCEJ
         
         # Passo 2: Criar cobrança PIX
         charge_data = {
-            "paymentMethod": "PIX",
+            "paymentMethod": "pix",
             "orderId": order_id
         }
         

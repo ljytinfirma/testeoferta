@@ -1691,11 +1691,99 @@ def criar_pagamento_pix():
         
         app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
         
-        # Importar função do gateway
-        from VPS_WITEPAY_CORRIGIDO import create_witepay_payment
+        # Criar pagamento diretamente - versão integrada
+        api_key = os.environ.get('WITEPAY_API_KEY')
+        if not api_key:
+            app.logger.error("WITEPAY_API_KEY não encontrada")
+            return jsonify({'success': False, 'error': 'API key não configurada'}), 400
         
-        # Criar pagamento
-        result = create_witepay_payment(amount, description)
+        # Dados padronizados para o pagamento ENCCEJA
+        order_data = {
+            "productData": [
+                {
+                    "name": description,
+                    "value": int(amount * 100)  # Converter para centavos (93.40 -> 9340)
+                }
+            ],
+            "clientData": {
+                "clientName": "Receita do Amor",
+                "clientDocument": "11111111000111",  # CPF/CNPJ apenas números
+                "clientEmail": "gerarpagamentos@gmail.com",
+                "clientPhone": "11987790088"  # Telefone apenas números
+            }
+        }
+        
+        headers = {
+            'x-api-key': api_key,
+            'Content-Type': 'application/json'
+        }
+        
+        app.logger.info(f"Criando ordem WitePay - Valor: R$ {amount:.2f}")
+        
+        # Passo 1: Criar ordem
+        order_response = requests.post(
+            'https://api.witepay.com.br/v1/order/create',
+            json=order_data,
+            headers=headers,
+            timeout=30
+        )
+        
+        app.logger.info(f"Status ordem: {order_response.status_code}")
+        
+        if order_response.status_code not in [200, 201]:
+            app.logger.error(f"Erro ao criar ordem: {order_response.status_code} - {order_response.text}")
+            return jsonify({'success': False, 'error': f'Erro ao criar ordem: {order_response.status_code}'}), 400
+        
+        order_result = order_response.json()
+        order_id = order_result.get('orderId')
+        
+        if not order_id:
+            app.logger.error(f"ID da ordem não encontrado: {order_result}")
+            return jsonify({'success': False, 'error': 'ID da ordem não encontrado'}), 400
+        
+        app.logger.info(f"Ordem criada com sucesso: {order_id}")
+        
+        # Passo 2: Criar cobrança PIX
+        charge_data = {
+            "paymentMethod": "pix",
+            "orderId": order_id
+        }
+        
+        charge_response = requests.post(
+            'https://api.witepay.com.br/v1/charge/create',
+            json=charge_data,
+            headers=headers,
+            timeout=30
+        )
+        
+        app.logger.info(f"Status cobrança: {charge_response.status_code}")
+        
+        if charge_response.status_code not in [200, 201]:
+            app.logger.error(f"Erro ao criar cobrança: {charge_response.status_code} - {charge_response.text}")
+            return jsonify({'success': False, 'error': f'Erro ao criar cobrança: {charge_response.status_code}'}), 400
+        
+        charge_result = charge_response.json()
+        
+        # Extrair dados do PIX
+        pix_code = charge_result.get('qrCode')
+        transaction_id = charge_result.get('chargeId') or charge_result.get('id') or order_id
+        
+        if not pix_code:
+            app.logger.error(f"Código PIX não encontrado: {charge_result}")
+            return jsonify({'success': False, 'error': 'Código PIX não encontrado'}), 400
+        
+        app.logger.info(f"Pagamento PIX criado com sucesso - ID: {transaction_id}")
+        
+        result = {
+            'success': True,
+            'transaction_id': transaction_id,
+            'pix_code': pix_code,
+            'qr_code': pix_code,
+            'amount': amount,
+            'order_id': order_id,
+            'expires_at': charge_result.get('expiresAt'),
+            'status': 'pending'
+        }
         
         if result.get('success'):
             # Salvar dados do pagamento na sessão
@@ -1722,12 +1810,12 @@ def criar_pagamento_pix():
                 'error': error_msg
             }), 400
     
-    except ImportError as e:
-        app.logger.error(f"Erro ao importar gateway: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Gateway de pagamento não disponível'
-        }), 500
+    except requests.exceptions.Timeout:
+        app.logger.error("Timeout na requisição WitePay")
+        return jsonify({'success': False, 'error': 'Timeout na requisição'}), 408
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Erro de conexão WitePay: {e}")
+        return jsonify({'success': False, 'error': 'Erro de conexão'}), 502
     except Exception as e:
         app.logger.error(f"Erro inesperado ao criar pagamento: {e}")
         return jsonify({
