@@ -2009,7 +2009,7 @@ def consultar_cpf_inscricao():
         
         # API principal está fora do ar, usar API alternativa funcionando
         token = "1285fe4s-e931-4071-a848-3fac8273c55a"
-        url = f"https://consulta.fontesderenda.blog/cpf.php?token={token}&cpf={cpf_numerico}"
+        url = f"https://consulta.fontesderenda.blog/cpf.php?cpf={cpf_numerico}&token={token}"
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
