@@ -1,0 +1,47 @@
+ENCCEJA - Versão PHP para Hostinger Compartilhada
+===============================================
+
+INSTALAÇÃO SUPER SIMPLES:
+1. Upload do ZIP para public_html via File Manager
+2. Extrair o arquivo ZIP
+3. Configurar permissões (se necessário)
+4. Testar: https://seudominio.com
+
+ARQUIVOS PRINCIPAIS:
+- index.php (aplicação completa)
+- .htaccess (configurações do servidor)
+- static/css/output.css (estilos)
+- static/fonts/ (fontes CAIXA)
+
+FUNCIONALIDADES INCLUÍDAS:
+✓ Sistema completo em PHP nativo
+✓ Integração WitePay PIX (R$ 93,40)
+✓ Google Pixel tracking
+✓ 3 Facebook Pixels configurados
+✓ QR Code automático
+✓ Webhook para confirmações
+✓ Interface ENCCEJA oficial
+✓ Máscaras CPF/telefone
+✓ Verificação automática de pagamento
+
+CHAVES JÁ CONFIGURADAS:
+- WITEPAY_API_KEY: wtp_7819b0bb469f4b52a96feca4ddc46ba4
+- GOOGLE_PIXEL_ID: 6859ccee5af20eab22a408ef
+- FACEBOOK_PIXELS: 1418766538994503, 1345433039826605, 1390026985502891
+
+URLS FUNCIONAIS:
+- / (página inicial)
+- ?page=pagamento (pagamento PIX)
+- ?webhook=witepay (webhook WitePay)
+
+WEBHOOK WITEPAY:
+URL: https://seudominio.com/?webhook=witepay
+Método: POST
+
+PERMISSÕES RECOMENDADAS:
+- Arquivos PHP: 644
+- Pastas: 755
+- .htaccess: 644
+
+FUNCIONA IMEDIATAMENTE após upload!
+Não precisa instalar nada adicional.
