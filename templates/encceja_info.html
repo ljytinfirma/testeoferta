@@ -49,8 +49,24 @@
             document.getElementById('cpf-display').textContent = userData.cpf;
             document.getElementById('nome-display').textContent = userData.nome;
             
-            // Configurar botão de pagamento
-            document.getElementById('pagar-button').addEventListener('click', function() {
+            // Configurar modal de pagamento
+            const pagarButton = document.getElementById('pagar-button');
+            const paymentModal = document.getElementById('payment-modal');
+            const cancelPaymentButton = document.getElementById('cancel-payment');
+            const confirmPaymentButton = document.getElementById('confirm-payment');
+            
+            // Mostrar o modal quando clicar no botão "Pagar Taxa e Concluir"
+            pagarButton.addEventListener('click', function() {
+                paymentModal.classList.remove('hidden');
+            });
+            
+            // Fechar o modal ao clicar em "Cancelar"
+            cancelPaymentButton.addEventListener('click', function() {
+                paymentModal.classList.add('hidden');
+            });
+            
+            // Processar pagamento ao clicar em "Vou realizar o pagamento"
+            confirmPaymentButton.addEventListener('click', function() {
                 window.location.href = '/pagamento';
             });
         });
@@ -160,6 +176,37 @@
                                 <i class="fas fa-credit-card mr-2"></i>
                                 <span>Pagar Taxa e Concluir</span>
                             </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Modal de Pagamento -->
+                    <div id="payment-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden flex items-center justify-center">
+                        <div class="bg-white rounded-md p-6 shadow-lg w-[450px] max-w-full mx-4">
+                            <div class="mb-4 text-center">
+                                <div class="bg-red-100 p-3 rounded-full inline-flex items-center justify-center mb-3">
+                                    <i class="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
+                                </div>
+                                <h3 class="text-xl font-bold text-gray-900">AVISO IMPORTANTE</h3>
+                            </div>
+                            
+                            <div class="mb-5 text-gray-700">
+                                <p class="mb-3">Ao prosseguir, você concorda em adicionar seu CPF na lista de participantes do ENCCEJA 2025 e se compromete a realizar o pagamento obrigatório de <strong class="text-red-600">R$ 93,40</strong>.</p>
+                                
+                                <p class="mb-3"><strong>ATENÇÃO:</strong> Caso você não realize o pagamento até a data de vencimento, será <strong>impedido de participar</strong> do ENCCEJA neste ano e nos próximos 2 anos.</p>
+                                
+                                <div class="bg-yellow-50 p-3 border border-yellow-200 rounded-md">
+                                    <p class="text-yellow-800"><strong>Importante:</strong> O pagamento é obrigatório para confirmar sua inscrição.</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex flex-col space-y-3">
+                                <button id="confirm-payment" class="w-full px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-semibold">
+                                    Vou realizar o pagamento
+                                </button>
+                                <button id="cancel-payment" class="w-full px-6 py-3 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors">
+                                    Não quero diploma de Ensino Médio
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
