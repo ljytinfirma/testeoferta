@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-ENCCEJA 2025 - Sistema de Inscrição e Pagamento PIX
-Versão FINAL COMPLETA para VPS com todas as APIs reais
+ENCCEJA 2025 - Sistema de Inscricao e Pagamento PIX
+Versao FINAL COMPLETA para VPS com todas as APIs reais
 CPF API + WitePay + Templates completos + Funnel funcional
 """
 
