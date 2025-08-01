@@ -1,0 +1,18 @@
+# Este seria um arquivo de templates, mas vou criar as instruções para preparar os arquivos
+
+# Para criar o pacote de templates na VPS, execute:
+# tar -czf templates_package.tar.gz templates/ static/
+
+# Os templates necessários são:
+# - inscricao.html
+# - pagamento.html  
+# - encceja_info.html
+# - validar_dados.html
+# - endereco.html
+# - local_prova.html
+# - inscricao_sucesso.html
+
+# Arquivos estáticos:
+# - static/css/output.css
+# - static/js/ (arquivos JavaScript)
+# - static/images/ (logos e imagens)

