@@ -464,6 +464,12 @@ def generate_qr_code(pix_code: str) -> str:
 @app.route('/index')
 @check_referer
 def index():
+    """Página principal - redireciona para /inscricao"""
+    return redirect(url_for('inscricao'))
+
+@app.route('/index-old')
+@check_referer
+def index_old():
     try:
         # Get data from query parameters for backward compatibility
         customer_data = {
