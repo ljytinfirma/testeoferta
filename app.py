@@ -1661,17 +1661,13 @@ def inscricao_sucesso():
     user_data = session.get('user_data', {})
     return render_template('inscricao_sucesso.html', user_data=user_data)
 
-@app.route('/encceja-info', methods=['GET', 'POST'])
+@app.route('/encceja-info')
 def encceja_info():
-    """Página com informações detalhadas sobre o Encceja"""
+    """Página com informações detalhadas sobre o Encceja - redireciona para pagamento"""
     user_data = session.get('user_data', {})
     
     if not user_data.get('cpf'):
         return redirect(url_for('inscricao'))
-    
-    if request.method == 'POST':
-        # Usuário confirmou que leu as informações, prosseguir para validar-dados
-        return redirect(url_for('validar_dados'))
     
     return render_template('encceja_info.html', user_data=user_data)
 
