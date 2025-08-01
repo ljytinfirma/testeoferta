@@ -1,0 +1,6 @@
+SESSION_SECRET=encceja_secret_key_2025_production
+WITEPAY_API_KEY=wtp_7819b0bb469f4b52a96feca4ddc46ba4
+DOMAIN_RESTRICTION_ENABLED=false
+FLASK_ENV=production
+GOOGLE_PIXEL_ID=6859ccee5af20eab22a408ef
+DEBUG=false
