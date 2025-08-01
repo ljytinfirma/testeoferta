@@ -106,6 +106,11 @@ def criar_pagamento_witepay_vps(amount: float, description: str = "Inscrição E
         app.logger.info(f"[VPS] Status da ordem: {order_response.status_code}")
         app.logger.info(f"[VPS] Resposta da ordem: {order_response.text}")
         
+        # Se erro 403, verificar se é problema de autenticação
+        if order_response.status_code == 403:
+            app.logger.error("[VPS] Erro 403 - Verificar se WITEPAY_API_KEY está correta na VPS")
+            return {'success': False, 'error': 'API Key inválida ou sem permissão - Verificar WITEPAY_API_KEY na VPS'}
+        
         if order_response.status_code not in [200, 201]:
             app.logger.error(f"[VPS] Erro ao criar ordem: {order_response.status_code} - {order_response.text}")
             return {'success': False, 'error': f'Erro ao criar ordem: {order_response.status_code}'}
