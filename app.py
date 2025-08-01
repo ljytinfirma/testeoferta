@@ -1587,10 +1587,27 @@ def inscricao():
     user_data = session.get('user_data', {'nome': '', 'cpf': '', 'phone': ''})
     return render_template('inscricao.html', user_data=user_data)
 
-@app.route('/validar-dados')
+@app.route('/validar-dados', methods=['GET', 'POST'])
 def validar_dados():
     """Página de validação de dados do usuário"""
-    return render_template('validar_dados.html')
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    if request.method == 'POST':
+        # Atualizar dados do usuário
+        user_data.update({
+            'telefone': request.form.get('telefone', ''),
+            'email': request.form.get('email', ''),
+            'endereco': request.form.get('endereco', ''),
+            'cidade': request.form.get('cidade', ''),
+            'estado': request.form.get('estado', '')
+        })
+        session['user_data'] = user_data
+        return redirect(url_for('endereco'))
+    
+    return render_template('validar_dados.html', user_data=user_data)
 
 @app.route('/endereco', methods=['GET', 'POST'])
 def endereco():
@@ -1614,24 +1631,45 @@ def endereco():
             'email': request.form.get('email', '')
         })
         session['user_data'] = user_data
-        return redirect(url_for('pagamento_encceja'))
+        return redirect(url_for('local_prova'))
     
     return render_template('endereco.html', user_data=user_data)
 
-@app.route('/local-prova')
+@app.route('/local-prova', methods=['GET', 'POST'])
 def local_prova():
     """Página de seleção do local de prova"""
-    return render_template('local_prova.html')
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('cpf'):
+        return redirect(url_for('inscricao'))
+    
+    if request.method == 'POST':
+        # Atualizar dados do usuário com local de prova
+        user_data.update({
+            'local_prova': request.form.get('local_prova', ''),
+            'cidade_prova': request.form.get('cidade_prova', ''),
+            'estado_prova': request.form.get('estado_prova', '')
+        })
+        session['user_data'] = user_data
+        return redirect(url_for('pagamento_encceja'))
+    
+    return render_template('local_prova.html', user_data=user_data)
 
 @app.route('/inscricao-sucesso')
 def inscricao_sucesso():
     """Página de sucesso da inscrição"""
-    return render_template('inscricao_sucesso.html')
+    user_data = session.get('user_data', {})
+    return render_template('inscricao_sucesso.html', user_data=user_data)
 
-@app.route('/encceja-info')
+@app.route('/encceja-info', methods=['GET', 'POST'])
 def encceja_info():
     """Página com informações detalhadas sobre o Encceja"""
-    return render_template('encceja_info.html')
+    user_data = session.get('user_data', {})
+    
+    if not user_data.get('sucesso'):
+        return redirect(url_for('inscricao'))
+    
+    return render_template('encceja_info.html', user_data=user_data)
 
 @app.route('/pagamento', methods=['GET', 'POST'])
 def pagamento_encceja():
