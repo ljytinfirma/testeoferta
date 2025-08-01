@@ -1,222 +1,263 @@
-# Correção do Erro "ModuleNotFoundError: No module named 'dotenv'"
+# Correção do Erro: Módulos Não Encontrados
 
-## Problema Identificado
-O erro mostra que o módulo `python-dotenv` não está instalado no ambiente Python do VPS.
-
-## Solução Passo a Passo
-
-### 1. Conectar no VPS via SSH
-```bash
-# No MobaXterm, conecte no VPS
-ssh root@SEU_IP_VPS
+## Erro Identificado
+```
+ModuleNotFoundError: No module named 'payment_gateway'
 ```
 
-### 2. Navegar para o Diretório do Projeto
+O erro indica que alguns arquivos Python não foram transferidos para o VPS ou as importações estão incorretas.
+
+## Solução: Criar Arquivos Faltantes no VPS
+
+### 1. Criar payment_gateway.py (arquivo simples)
 ```bash
 cd /var/www/encceja
+nano payment_gateway.py
 ```
 
-### 3. Ativar Ambiente Virtual (se criado)
+**Conteúdo:**
+```python
+# payment_gateway.py - Arquivo de compatibilidade
+def get_payment_gateway():
+    """Retorna o gateway WitePay como padrão"""
+    return "witepay"
+
+# Função de compatibilidade
+def create_payment(amount, description="Pagamento ENCCEJA"):
+    """Compatibilidade com código antigo"""
+    from witepay_gateway import create_witepay_payment
+    return create_witepay_payment(amount, description)
+```
+
+### 2. Verificar se witepay_gateway.py existe
 ```bash
-# Se você criou um ambiente virtual
-source venv/bin/activate
-
-# Verificar se está ativo (deve aparecer (venv) no prompt)
+ls -la /var/www/encceja/witepay_gateway.py
 ```
 
-### 4. Instalar Dependências em Falta
+Se não existir, criar:
 ```bash
-# Instalar python-dotenv especificamente
-pip3 install python-dotenv
-
-# Instalar todas as dependências do projeto
-pip3 install flask gunicorn python-dotenv requests qrcode pillow psycopg2-binary twilio email-validator flask-sqlalchemy
+nano witepay_gateway.py
 ```
 
-### 5. Verificar Instalação
+**Conteúdo básico:**
+```python
+import os
+import requests
+from datetime import datetime
+from flask import current_app
+from typing import Dict, Any
+
+def create_witepay_payment(amount: float, product_name: str = "Receita do Amor") -> Dict[str, Any]:
+    """
+    Cria pagamento PIX via WitePay API
+    """
+    api_key = os.environ.get("WITEPAY_API_KEY", "wtp_7819b0bb469f4b52a96feca4ddc46ba4")
+    
+    # Dados do pedido
+    order_data = {
+        "amount": int(amount * 100),  # Converter para centavos
+        "currency": "BRL",
+        "customer": {
+            "name": "Usuario ENCCEJA",
+            "email": "gerarpagamentos@gmail.com",
+            "phone": "(11) 98779-0088"
+        },
+        "items": [{
+            "title": product_name,
+            "quantity": 1,
+            "amount": int(amount * 100)
+        }]
+    }
+    
+    try:
+        # Criar pedido
+        order_response = requests.post(
+            "https://api.witepay.com/v1/order/create",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json=order_data,
+            timeout=30
+        )
+        
+        if order_response.status_code == 200:
+            order = order_response.json()
+            order_id = order.get("data", {}).get("id")
+            
+            # Criar cobrança PIX
+            charge_data = {
+                "order_id": order_id,
+                "payment_method": "PIX"
+            }
+            
+            charge_response = requests.post(
+                "https://api.witepay.com/v1/charge/create",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=charge_data,
+                timeout=30
+            )
+            
+            if charge_response.status_code == 200:
+                charge = charge_response.json()
+                charge_data = charge.get("data", {})
+                
+                return {
+                    "success": True,
+                    "transaction_id": charge_data.get("id"),
+                    "pix_code": charge_data.get("pix_code"),
+                    "qr_code": charge_data.get("pix_code"),
+                    "amount": amount,
+                    "status": "pending"
+                }
+    
+    except Exception as e:
+        current_app.logger.error(f"Erro WitePay: {e}")
+    
+    # Fallback em caso de erro
+    return {
+        "success": False,
+        "error": "Erro ao gerar pagamento PIX"
+    }
+
+def check_payment_status(transaction_id: str) -> Dict[str, Any]:
+    """
+    Verifica status do pagamento
+    """
+    api_key = os.environ.get("WITEPAY_API_KEY")
+    
+    try:
+        response = requests.get(
+            f"https://api.witepay.com/v1/charge/{transaction_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            data = response.json().get("data", {})
+            return {
+                "status": data.get("status", "pending"),
+                "paid": data.get("status") in ["PAID", "COMPLETED", "APPROVED"]
+            }
+    
+    except Exception as e:
+        current_app.logger.error(f"Erro verificação status: {e}")
+    
+    return {"status": "pending", "paid": False}
+```
+
+### 3. Verificar requirements.txt
 ```bash
-python3 -c "import dotenv; print('dotenv instalado com sucesso!')"
+cat /var/www/encceja/requirements.txt
 ```
 
-### 6. Criar Arquivo requirements.txt (se não existir)
+Se estiver vazio ou incompleto, criar com dependências corretas:
 ```bash
 nano requirements.txt
 ```
 
-**Conteúdo do requirements.txt:**
-```txt
-Flask==2.3.3
-gunicorn==21.2.0
-python-dotenv==1.0.0
-requests==2.31.0
-qrcode==7.4.2
-Pillow==10.0.1
-psycopg2-binary==2.9.7
-twilio==8.10.0
-email-validator==2.1.0
-Flask-SQLAlchemy==3.1.1
+**Conteúdo:**
+```
+Flask==3.0.3
+gunicorn==23.0.0
+python-dotenv==1.0.1
+requests==2.32.3
+qrcode[pil]==7.4.2
+twilio==9.2.3
+email-validator==2.2.0
+flask-sqlalchemy==3.1.1
+psycopg2-binary==2.9.9
 ```
 
-### 7. Instalar a partir do requirements.txt
+### 4. Reinstalar dependências
 ```bash
-pip3 install -r requirements.txt
+cd /var/www/encceja
+source venv/bin/activate
+pip install -r requirements.txt --force-reinstall
 ```
 
-### 8. Configurar Variáveis de Ambiente
+### 5. Criar .env se não existir
 ```bash
 nano .env
 ```
 
-**Conteúdo do .env:**
+**Conteúdo:**
 ```env
-SESSION_SECRET=sua_chave_secreta_super_segura_123456789
+SESSION_SECRET=encceja_secret_key_2025_production
 WITEPAY_API_KEY=wtp_7819b0bb469f4b52a96feca4ddc46ba4
 DOMAIN_RESTRICTION_ENABLED=false
 FLASK_ENV=production
+GOOGLE_PIXEL_ID=6859ccee5af20eab22a408ef
+DEBUG=false
 ```
 
-### 9. Testar a Aplicação Manualmente
+### 6. Testar novamente
 ```bash
-# Testar se a aplicação inicia
-python3 main.py
+cd /var/www/encceja
+source venv/bin/activate
+python main.py
 ```
 
-### 10. Se ainda der erro, verificar o main.py
+### 7. Se ainda der erro, verificar app.py
 ```bash
-nano main.py
+head -30 /var/www/encceja/app.py
 ```
 
-**Conteúdo correto do main.py:**
+O arquivo app.py deve ter as importações corretas no topo.
+
+## Comandos de Emergência
+
+### Se continuar dando erro, criar app.py mínimo:
+```bash
+nano app_minimo.py
+```
+
+**Conteúdo:**
 ```python
-from app import app
+from flask import Flask, render_template, request, session, redirect, url_for
 import os
 
+app = Flask(__name__)
+app.secret_key = os.environ.get("SESSION_SECRET", "fallback_secret")
+
+@app.route('/')
+def index():
+    return '''
+    <html>
+    <head><title>ENCCEJA 2025</title></head>
+    <body style="font-family: Arial; text-align: center; margin-top: 100px;">
+        <h1>ENCCEJA 2025 - Sistema Online</h1>
+        <p>Aplicação Python rodando no VPS!</p>
+        <form method="post" action="/teste">
+            <input type="text" name="cpf" placeholder="Digite seu CPF" required>
+            <button type="submit">Consultar</button>
+        </form>
+    </body>
+    </html>
+    '''
+
+@app.route('/teste', methods=['POST'])
+def teste():
+    cpf = request.form.get('cpf', '')
+    return f"<h1>CPF recebido: {cpf}</h1><p>Sistema funcionando!</p>"
+
 if __name__ == "__main__":
-    # Para produção no VPS
     app.run(host="0.0.0.0", port=5000, debug=False)
 ```
 
-### 11. Configurar Gunicorn
+### Testar app mínimo:
 ```bash
-# Testar com Gunicorn
-gunicorn --bind 0.0.0.0:5000 --workers 2 main:app
+python app_minimo.py
 ```
 
-### 12. Configurar Supervisor para Executar Automaticamente
+### Se funcionar, atualizar supervisor:
 ```bash
 sudo nano /etc/supervisor/conf.d/encceja.conf
 ```
 
-**Conteúdo:**
-```ini
-[program:encceja]
-command=/usr/bin/python3 -m gunicorn --bind 0.0.0.0:5000 --workers 2 main:app
-directory=/var/www/encceja
-user=root
-autostart=true
-autorestart=true
-redirect_stderr=true
-stdout_logfile=/var/log/encceja.log
-environment=PATH="/usr/bin"
-```
+Trocar `main:app` por `app_minimo:app` temporariamente.
 
-### 13. Recarregar Supervisor
-```bash
-sudo supervisorctl reread
-sudo supervisorctl update
-sudo supervisorctl start encceja
-sudo supervisorctl status
-```
-
-### 14. Verificar Logs
-```bash
-# Ver logs da aplicação
-tail -f /var/log/encceja.log
-
-# Ver status do supervisor
-sudo supervisorctl status encceja
-```
-
-## Comandos de Diagnóstico
-
-### Se ainda houver problemas:
-```bash
-# Verificar versão do Python
-python3 --version
-
-# Verificar módulos instalados
-pip3 list
-
-# Verificar se o arquivo main.py existe
-ls -la main.py
-
-# Verificar se o arquivo app.py existe
-ls -la app.py
-
-# Testar importação
-python3 -c "from app import app; print('App importado com sucesso!')"
-```
-
-## Estrutura de Arquivos Esperada
-
-```
-/var/www/encceja/
-├── main.py              # Ponto de entrada
-├── app.py               # Aplicação Flask principal
-├── requirements.txt     # Dependências Python
-├── .env                # Variáveis de ambiente
-├── templates/          # Templates HTML
-├── static/            # CSS, JS, imagens
-└── witepay_gateway.py # Gateway de pagamento
-```
-
-## Permissões de Arquivo
-
-```bash
-# Ajustar permissões se necessário
-sudo chown -R root:root /var/www/encceja
-chmod -R 755 /var/www/encceja
-chmod 644 /var/www/encceja/*.py
-```
-
-## Teste Final
-
-```bash
-# Testar aplicação localmente no VPS
-curl http://localhost:5000
-
-# Se retornar HTML, está funcionando
-# Agora configure o Nginx para servir na porta 80
-```
-
-## Se Continuar com Problemas
-
-### Reinstalar Python e dependências:
-```bash
-# Atualizar sistema
-sudo apt update && sudo apt upgrade -y
-
-# Reinstalar Python
-sudo apt install python3 python3-pip python3-venv -y
-
-# Criar novo ambiente virtual
-python3 -m venv /var/www/encceja/venv
-source /var/www/encceja/venv/bin/activate
-
-# Instalar dependências no ambiente virtual
-pip install -r requirements.txt
-```
-
-### Usar o ambiente virtual no supervisor:
-```ini
-[program:encceja]
-command=/var/www/encceja/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 2 main:app
-directory=/var/www/encceja
-user=root
-autostart=true
-autorestart=true
-redirect_stderr=true
-stdout_logfile=/var/log/encceja.log
-```
-
-Siga estes passos e a aplicação deve funcionar corretamente no VPS!
+Execute essas correções na ordem e me informe o resultado!
