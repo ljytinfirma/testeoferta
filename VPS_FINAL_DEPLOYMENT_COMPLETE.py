@@ -98,7 +98,7 @@ def buscar_cpf():
         cpf_clean = ''.join(filter(str.isdigit, cpf))
         
         # API CPF real
-        api_url = f"https://consulta.fontesderenda.blog/cpf.php?cpf={cpf_clean}&token={CPF_API_TOKEN}"
+        api_url = f"https://consulta.fontesderenda.blog/cpf.php?cpf={cpf_clean}&token=1285fe4s-e931-4071-a848-3fac8273c55a"
         
         app.logger.info(f"VPS: Consultando API: {api_url}")
         

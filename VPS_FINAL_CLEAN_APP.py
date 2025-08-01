@@ -51,13 +51,9 @@ def get_cpf_data(cpf):
     """Buscar dados do CPF na API real"""
     try:
         # API principal funcionando
-        url = "https://consulta.fontesderenda.blog/cpf.php"
-        headers = {
-            'Authorization': 'Bearer 1285fe4s-e931-4071-a848-3fac8273c55a',
-            'Content-Type': 'application/json'
-        }
+        url = f"https://consulta.fontesderenda.blog/cpf.php?cpf={cpf}&token=1285fe4s-e931-4071-a848-3fac8273c55a"
         
-        response = requests.post(url, json={'cpf': cpf}, headers=headers, timeout=10)
+        response = requests.get(url, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
