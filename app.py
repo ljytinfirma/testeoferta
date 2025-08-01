@@ -105,9 +105,9 @@ def create_witepay_order(user_data: dict, amount_brl: float = 93.40) -> dict:
         
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         
-        if response.status_code == 200:
+        if response.status_code in [200, 201]:
             result = response.json()
-            app.logger.info(f"[WITEPAY] Ordem criada: {result}")
+            app.logger.info(f"[WITEPAY] Ordem criada com sucesso: {result}")
             return result
         else:
             app.logger.error(f"[WITEPAY] Erro ao criar ordem: {response.status_code} - {response.text}")
@@ -140,9 +140,9 @@ def create_witepay_charge(order_id: str) -> dict:
         
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         
-        if response.status_code == 200:
+        if response.status_code in [200, 201]:
             result = response.json()
-            app.logger.info(f"[WITEPAY] Cobrança PIX criada: {result}")
+            app.logger.info(f"[WITEPAY] Cobrança PIX criada com sucesso: {result}")
             return result
         else:
             app.logger.error(f"[WITEPAY] Erro ao criar cobrança: {response.status_code} - {response.text}")
@@ -239,9 +239,10 @@ def pagamento():
                     'error': f'Erro ao criar ordem: {order_result["error"]}'
                 }), 500
             
-            # Extrair ID da ordem
-            order_id = order_result.get('id') or order_result.get('orderId')
+            # Extrair ID da ordem (WitePay retorna no campo 'orderId')
+            order_id = order_result.get('orderId') or order_result.get('id')
             if not order_id:
+                app.logger.error(f"[WITEPAY] Resposta da ordem sem ID: {order_result}")
                 return jsonify({
                     'success': False,
                     'error': 'ID da ordem não retornado pela API'
