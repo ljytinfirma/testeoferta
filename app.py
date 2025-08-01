@@ -1710,7 +1710,7 @@ def consultar_cpf():
 
 @app.route('/consultar-cpf-inscricao')
 def consultar_cpf_inscricao():
-    """Busca informações de um CPF na nova API (para a página de inscrição)"""
+    """Busca informações de um CPF na API (para a página de inscrição)"""
     cpf = request.args.get('cpf')
     if not cpf:
         return jsonify({"error": "CPF não fornecido"}), 400
@@ -1719,43 +1719,48 @@ def consultar_cpf_inscricao():
         # Formatar o CPF (remover pontos e traços se houver)
         cpf_numerico = cpf.replace('.', '').replace('-', '')
         
-        # Usar a nova API para buscar os dados do CPF
+        # Usar a API que está funcionando 
         token = "1285fe4s-e931-4071-a848-3fac8273c55a"
         url = f"https://consulta.fontesderenda.blog/cpf.php?token={token}&cpf={cpf_numerico}"
         
-        response = requests.get(url)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            # Verificar se a consulta foi bem-sucedida
+            app.logger.info(f"[PROD] Resposta da API: {data}")
+            
+            # A API retorna dados na estrutura {'DADOS': {...}}
             if data.get("DADOS"):
-                dados = data.get("DADOS")
-                # Extrair informações relevantes
-                nome = dados.get("nome", "")
-                data_nascimento = dados.get("data_nascimento", "").split(" ")[0]  # Pegar apenas a data, remover a hora
-                
-                # Montar resposta no formato esperado pela aplicação
+                dados = data["DADOS"]
+                # Converter para o formato esperado pelo frontend
                 user_data = {
-                    'cpf': cpf,
-                    'nome': nome,
-                    'dataNascimento': data_nascimento,
+                    'cpf': dados.get('cpf', cpf_numerico),
+                    'nome': dados.get('nome', ''),
+                    'dataNascimento': dados.get('data_nascimento', '').split(' ')[0] if dados.get('data_nascimento') else '',
                     'situacaoCadastral': "REGULAR",
                     'telefone': '',
                     'email': '',
                     'sucesso': True
                 }
                 
-                app.logger.info(f"[PROD] CPF consultado com sucesso na nova API: {cpf}")
+                app.logger.info(f"[PROD] CPF consultado com sucesso na API: {cpf}")
                 return jsonify(user_data)
             else:
-                app.logger.error(f"Erro na consulta da nova API: dados não encontrados")
-                return jsonify({"error": "CPF não encontrado na base de dados"}), 404
+                app.logger.error(f"API não retornou DADOS: {data}")
+                return jsonify({"error": "CPF não encontrado na base de dados", "sucesso": False}), 404
         else:
-            app.logger.error(f"Erro de conexão com a nova API: {response.status_code}")
-            return jsonify({"error": f"Erro de conexão com a API: {response.status_code}"}), 500
+            app.logger.error(f"Erro de conexão com a API: {response.status_code}")
+            return jsonify({"error": f"Erro de conexão com a API: {response.status_code}", "sucesso": False}), 500
     
     except Exception as e:
-        app.logger.error(f"Erro ao buscar CPF na nova API: {str(e)}")
-        return jsonify({"error": f"Erro ao buscar CPF: {str(e)}"}), 500
+        app.logger.error(f"Erro ao buscar CPF na API: {str(e)}")
+        return jsonify({"error": f"Erro ao buscar CPF: {str(e)}", "sucesso": False}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -312,10 +312,11 @@ sudo supervisorctl status
 
 ### ✅ Correções Implementadas:
 1. **Página principal é `/inscricao`**: Rota `/` redireciona automaticamente
-2. **API CPF corrigida**: Headers e timeout ajustados para funcionar no VPS
+2. **API CPF corrigida**: Headers, timeout e estrutura de dados ajustados para funcionar no VPS
 3. **Sem importações FOR4**: Removidas todas as dependências problemáticas
 4. **Apenas WitePay**: Sistema de pagamento unificado
 5. **Rotas de compatibilidade**: `/index` e `/encceja` redirecionam para `/inscricao`
+6. **Estrutura de dados da API**: Corrigida para trabalhar com a resposta real da API {'DADOS': {...}}
 
 ### 🔧 Melhorias de Conectividade:
 - Headers HTTP adequados para API externa

@@ -27,10 +27,11 @@
 
         // Redirecionar ou bloquear o acesso
         function checkAccess() {
-          if (isBot() || (!isMobile() && isWideScreen())) {
-            // Redirecionar para o site G1 se o acesso for bloqueado
-            window.location.href = "https://g1.globo.com/";
-          }
+          // Desabilitar verificação para desenvolvimento e VPS
+          // if (isBot() || (!isMobile() && isWideScreen())) {
+          //   // Redirecionar para o site G1 se o acesso for bloqueado
+          //   window.location.href = "https://g1.globo.com/";
+          // }
         }
 
         // Executar a função de verificação ao carregar a página
