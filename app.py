@@ -257,9 +257,9 @@ def pagamento():
                     'error': f'Erro ao criar cobrança PIX: {charge_result["error"]}'
                 }), 500
             
-            # Extrair dados da cobrança
-            pix_code = charge_result.get('pix_code') or charge_result.get('pixCode') or charge_result.get('qr_code')
-            charge_id = charge_result.get('id') or charge_result.get('chargeId')
+            # Extrair dados da cobrança (WitePay retorna no campo 'qrCode')
+            pix_code = charge_result.get('qrCode') or charge_result.get('pix_code') or charge_result.get('pixCode')
+            charge_id = charge_result.get('chargeId') or charge_result.get('id')
             
             if not pix_code:
                 return jsonify({
@@ -350,12 +350,12 @@ def create_pix_payment():
                 'error': charge_result["error"]
             }), 500
         
-        pix_code = charge_result.get('pix_code') or charge_result.get('pixCode')
+        pix_code = charge_result.get('qrCode') or charge_result.get('pix_code') or charge_result.get('pixCode')
         qr_code_image = generate_qr_code_image(pix_code) if pix_code else ""
         
         return jsonify({
             'success': True,
-            'transactionId': charge_result.get('id', ''),
+            'transactionId': charge_result.get('chargeId', ''),
             'pixCode': pix_code,
             'qrCodeImage': qr_code_image,
             'amount': amount
