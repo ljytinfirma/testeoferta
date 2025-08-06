@@ -380,13 +380,22 @@ def comprovante():
         if not transaction_id:
             return redirect(url_for('index'))
         
-        # Verificar status do pagamento
-        from freepay_gateway import check_payment_status
-        status_result = check_payment_status(transaction_id)
-        
-        if not status_result.get('success') or not status_result.get('paid'):
-            # Se não foi pago, redirecionar para o pagamento
-            return redirect(url_for('pagamento'))
+        # Verificar status do pagamento (exceto para simulação de teste)
+        if transaction_id.startswith('TEST-SIMULATION'):
+            # Para simulação, assumir como pago
+            status_result = {
+                'success': True,
+                'paid': True,
+                'amount': 9340,
+                'paid_at': '2025-08-06T01:20:00-03:00'
+            }
+        else:
+            from freepay_gateway import check_payment_status
+            status_result = check_payment_status(transaction_id)
+            
+            if not status_result.get('success') or not status_result.get('paid'):
+                # Se não foi pago, redirecionar para o pagamento
+                return redirect(url_for('pagamento'))
         
         # Dados do usuário da sessão
         user_data = session.get('user_data', {})
@@ -428,6 +437,59 @@ def comprovante():
     except Exception as e:
         app.logger.error(f"[COMPROVANTE] Erro: {str(e)}")
         return redirect(url_for('index'))
+
+@app.route('/simular-compra')
+@check_referer
+def simular_compra():
+    """Simula uma compra aprovada para teste do comprovante"""
+    try:
+        # Dados simulados de uma compra aprovada
+        from datetime import datetime
+        
+        # Dados do usuário simulado
+        session['user_data'] = {
+            'cpf': '04379721949',
+            'nome': 'SERGIO HENRIQUE EWBANK',
+            'dataNascimento': '1947-04-20',
+            'email': 'sergio.ewbank@email.com',
+            'telefone': '(11) 99425-2525',
+            'situacaoCadastral': 'REGULAR',
+            'sucesso': True
+        }
+        
+        # Dados do endereço simulado
+        session['address_data'] = {
+            'cep': '07090-010',
+            'logradouro': 'Rua Morvam de Figueredo',
+            'numero': '6565',
+            'complemento': '',
+            'bairro': 'Centro',
+            'cidade': 'Guarulhos',
+            'uf': 'SP',
+            'telefone': '(11) 99425-2525'
+        }
+        
+        # Dados do pagamento simulado
+        transaction_id = 'TEST-SIMULATION-123456789'
+        session['transaction_id'] = transaction_id
+        session['payment_data'] = {
+            'transactionId': transaction_id,
+            'amount': 93.40,
+            'pixCode': '00020101021226840014br.gov.bcb.pix...',
+            'status': 'paid',
+            'nome': 'SERGIO HENRIQUE EWBANK',
+            'cpf': '04379721949',
+            'telefone': '(11) 99425-2525'
+        }
+        
+        app.logger.info(f"[SIMULAÇÃO] Dados de compra simulada criados com sucesso")
+        
+        # Redirecionar diretamente para o comprovante
+        return redirect(url_for('comprovante'))
+        
+    except Exception as e:
+        app.logger.error(f"[SIMULAÇÃO] Erro: {str(e)}")
+        return jsonify({'error': f'Erro na simulação: {str(e)}'}), 500
 
 @app.route('/consultar-cpf-inscricao')
 def consultar_cpf_inscricao():
