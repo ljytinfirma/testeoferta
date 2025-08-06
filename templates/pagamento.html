@@ -855,14 +855,11 @@
                     const cpf = userData.cpf || '';
                     const telefone = userData.telefone || '';
                     
-                    // Redirecionar instantaneamente para a página de agradecimento com os dados do usuário
-                    const urlParams = new URLSearchParams();
-                    if (nome) urlParams.append('nome', nome);
-                    if (cpf) urlParams.append('cpf', cpf);
-                    if (telefone) urlParams.append('phone', telefone);
-                    
-                    // Redirecionar instantaneamente
-                    window.location.href = '/obrigado?' + urlParams.toString();
+                    // Redirecionar para a página de comprovante
+                    setTimeout(() => {
+                        console.log('Redirecionando para o comprovante...');
+                        window.location.href = '/comprovante';
+                    }, 2000); // Aguardar 2 segundos para que o usuário veja a mensagem de sucesso
                 }
                 // Se o pagamento foi recusado ou cancelado
                 else if (data.status === 'CANCELED' || data.status === 'REJECTED' || data.status === 'FAILED') {

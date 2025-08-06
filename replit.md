@@ -102,3 +102,26 @@ The system supports a multi-step user flow including CPF-based user lookup, form
 - Simplified payment flow (one API call instead of two)
 - Maintains same user experience with PIX QR codes
 - Updated error handling for FreePay response format
+
+### Payment Status Verification & Receipt System
+**Change**: Implemented payment status verification using FreePay's transaction lookup API and automated receipt generation
+**Reason**: User requested payment verification and receipt generation upon successful payment
+**Files Modified**:
+- Updated `freepay_gateway.py` - Added `check_payment_status()` function for transaction lookup
+- Updated `app.py` - Enhanced `/verificar-pagamento` route to use FreePay status check and added `/comprovante` route
+- Created `templates/comprovante.html` - Professional receipt template with exam scheduling (5 days post-payment)
+- Updated `templates/pagamento.html` - Auto-redirect to receipt page when payment is confirmed
+
+**Technical Details**:
+- Uses GET `/functions/v1/transactions/{id}` endpoint to check payment status
+- Automatic redirection to `/comprovante` when status becomes 'paid'
+- Receipt includes: candidate data, address, payment proof, exam date (+5 days), unique enrollment number
+- Print-friendly design with government-style branding
+- Session-based data persistence for receipt generation
+
+**Features Added**:
+- Real-time payment status polling (10-second intervals)
+- Automatic receipt generation with exam scheduling
+- Professional government-style receipt design
+- Print functionality for physical copies
+- Unique enrollment number generation (ENCCEJA + transaction ID)

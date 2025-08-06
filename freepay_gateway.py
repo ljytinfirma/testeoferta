@@ -182,6 +182,69 @@ class FreePayGateway:
                 'error': error_msg
             }
 
+def check_payment_status(transaction_id):
+    """
+    Verifica o status de um pagamento PIX na FreePay
+    """
+    try:
+        current_app.logger.info(f"[FREEPAY] Verificando status do pagamento: {transaction_id}")
+        
+        # Configurar headers com autenticação Basic
+        secret_key = "sk_live_pGalAgvdrYzpdoaBqmWJH3iOb2uqi9cA1jlJXTfEWfqwCw9a"
+        auth_string = base64.b64encode(f"{secret_key}:x".encode()).decode()
+        
+        headers = {
+            'Authorization': f'Basic {auth_string}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Endpoint para buscar transação específica
+        url = f"https://api.freepaybr.com/functions/v1/transactions/{transaction_id}"
+        
+        current_app.logger.debug(f"[FREEPAY] Fazendo requisição GET para: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        current_app.logger.info(f"FreePay status check response status: {response.status_code}")
+        current_app.logger.debug(f"Status check response text: {response.text}")
+        
+        if response.status_code == 200:
+            transaction_data = response.json()
+            current_app.logger.info(f"Status da transação obtido com sucesso")
+            
+            # Extrair informações relevantes
+            status = transaction_data.get('status')
+            paid_at = transaction_data.get('paidAt')
+            amount = transaction_data.get('amount', 0)
+            customer = transaction_data.get('customer', {})
+            pix_data = transaction_data.get('pix', {})
+            
+            current_app.logger.info(f"[FREEPAY] Status: {status}, Pago em: {paid_at}")
+            
+            return {
+                'success': True,
+                'transaction_id': transaction_id,
+                'status': status,
+                'paid': status == 'paid',
+                'paid_at': paid_at,
+                'amount': amount,
+                'customer': customer,
+                'pix_data': pix_data,
+                'full_data': transaction_data
+            }
+        else:
+            current_app.logger.error(f"[FREEPAY] Erro ao verificar status - HTTP {response.status_code}: {response.text}")
+            return {
+                'success': False,
+                'error': f'Erro HTTP {response.status_code} ao verificar status do pagamento'
+            }
+            
+    except Exception as e:
+        current_app.logger.error(f"[FREEPAY] Erro ao verificar status: {str(e)}")
+        return {
+            'success': False,
+            'error': f'Erro na comunicação com FreePay: {str(e)}'
+        }
+
 def create_freepay_gateway():
     """Factory function to create FreePay gateway instance"""
     return FreePayGateway()

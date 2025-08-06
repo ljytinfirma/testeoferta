@@ -229,13 +229,17 @@ def pagamento():
             qr_code_image = generate_qr_code_image(pix_code)
             
             # Armazenar dados na sessão
+            session['transaction_id'] = transaction_id  # Para o comprovante
             session['payment_data'] = {
                 'transactionId': transaction_id,
                 'amount': amount,
                 'pixCode': pix_code,
                 'qrCodeImage': qr_code_image,
                 'status': payment_result.get('status', 'pending'),
-                'expiresAt': payment_result.get('expiresAt')
+                'expiresAt': payment_result.get('expiresAt'),
+                'nome': user_data.get('nome', ''),
+                'cpf': user_data.get('cpf', ''),
+                'telefone': user_data.get('telefone', '')
             }
             
             app.logger.info(f"[PAGAMENTO] PIX criado com sucesso via FreePay - Transação: {transaction_id}, Valor: R$ {amount:.2f}")
@@ -329,12 +333,34 @@ def verificar_pagamento():
         
         app.logger.info(f"[PAGAMENTO] Verificando status para transação: {transaction_id}")
         
-        # Por enquanto retorna status pendente - WitePay não documentou endpoint de consulta
+        # Verificar status na FreePay
+        from freepay_gateway import check_payment_status
+        
+        status_result = check_payment_status(transaction_id)
+        
+        if not status_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': status_result.get('error', 'Erro ao consultar status')
+            }), 500
+        
+        # Mapear status da FreePay
+        status = status_result.get('status', 'pending')
+        paid = status_result.get('paid', False)
+        
+        # Se o pagamento foi aprovado, armazenar o transaction_id na sessão
+        if paid:
+            session['transaction_id'] = transaction_id
+        
         return jsonify({
             'success': True,
-            'status': 'PENDING',
-            'message': 'Aguardando confirmação do pagamento PIX',
-            'transactionId': transaction_id
+            'status': 'PAID' if paid else 'PENDING',
+            'message': 'Pagamento confirmado!' if paid else 'Aguardando confirmação do pagamento PIX',
+            'transactionId': transaction_id,
+            'paid': paid,
+            'paid_at': status_result.get('paid_at'),
+            'redirect_url': url_for('comprovante') if paid else None,
+            'data': status_result.get('full_data', {})
         })
         
     except Exception as e:
@@ -343,6 +369,65 @@ def verificar_pagamento():
             'success': False,
             'error': f'Erro interno: {str(e)}'
         }), 500
+
+@app.route('/comprovante')
+@check_referer
+def comprovante():
+    """Página de comprovante de inscrição após pagamento aprovado"""
+    try:
+        # Verificar se há dados na sessão
+        transaction_id = session.get('transaction_id')
+        if not transaction_id:
+            return redirect(url_for('index'))
+        
+        # Verificar status do pagamento
+        from freepay_gateway import check_payment_status
+        status_result = check_payment_status(transaction_id)
+        
+        if not status_result.get('success') or not status_result.get('paid'):
+            # Se não foi pago, redirecionar para o pagamento
+            return redirect(url_for('pagamento'))
+        
+        # Dados do usuário da sessão
+        user_data = session.get('user_data', {})
+        address_data = session.get('address_data', {})
+        payment_data = session.get('payment_data', {})
+        
+        # Calcular data da prova (5 dias após a compra)
+        from datetime import datetime, timedelta
+        purchase_date = datetime.now()
+        exam_date = purchase_date + timedelta(days=5)
+        
+        # Dados do comprovante
+        comprovante_data = {
+            'nome': user_data.get('nome', ''),
+            'cpf': user_data.get('cpf', ''),
+            'endereco': {
+                'logradouro': address_data.get('logradouro', ''),
+                'numero': address_data.get('numero', ''),
+                'bairro': address_data.get('bairro', ''),
+                'cidade': address_data.get('cidade', ''),
+                'uf': address_data.get('uf', ''),
+                'cep': address_data.get('cep', '')
+            },
+            'telefone': payment_data.get('telefone', ''),
+            'email': user_data.get('email', ''),
+            'transaction_id': transaction_id,
+            'valor_pago': status_result.get('amount', 9340) / 100,  # Convert from centavos
+            'data_pagamento': status_result.get('paid_at'),
+            'data_prova': exam_date.strftime('%d/%m/%Y'),
+            'horario_prova': '14:00',
+            'local_prova': 'Será informado posteriormente',
+            'numero_inscricao': f"ENCCEJA{transaction_id[:8].upper()}"
+        }
+        
+        app.logger.info(f"[COMPROVANTE] Exibindo comprovante para transação: {transaction_id}")
+        
+        return render_template('comprovante.html', **comprovante_data)
+        
+    except Exception as e:
+        app.logger.error(f"[COMPROVANTE] Erro: {str(e)}")
+        return redirect(url_for('index'))
 
 @app.route('/consultar-cpf-inscricao')
 def consultar_cpf_inscricao():
