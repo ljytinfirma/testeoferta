@@ -131,7 +131,7 @@ The system supports a multi-step user flow including CPF-based user lookup, form
 **Reason**: User requested consistent visual design without animations, following government standards
 **Files Modified**:
 - Updated `templates/comprovante.html` - Removed animations, applied funnel color palette, standardized layout
-- Added `static/images/inep-logo-branco.png` - White INEP logo for header branding
+- Added `static/images/inep-logo-header.png` - INEP logo for header branding
 
 **Design Changes**:
 - Removed all animations and flashy elements
