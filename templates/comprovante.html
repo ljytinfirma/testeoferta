@@ -4,32 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Comprovante de Inscrição - ENCCEJA 2025</title>
+    <link rel="stylesheet" href="/static/css/rawline-fonts.css">
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet"/>
     
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+            font-family: 'Rawline', Arial, sans-serif;
+            background-color: #f5f5f5;
         }
 
-        .card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+        .gov-header {
+            background-color: #222222;
         }
-
-        .print-button {
-            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-            transition: all 0.3s ease;
+        .inep-header {
+            background-color: #044785;
         }
-
-        .print-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(76, 175, 80, 0.3);
+        .encceja-color {
+            color: #3b5998;
+        }
+        .form-header {
+            background-color: #2c5985;
+            color: white;
+        }
+        .form-footer {
+            background-color: #5d85ab;
+            color: white;
+        }
+        .footer-bg {
+            background-color: #1c2b39;
         }
 
         @media print {
@@ -39,234 +42,222 @@
             .no-print {
                 display: none !important;
             }
-            .card {
+            .gov-header, .inep-header, .footer-bg {
                 background: white !important;
-                border: 2px solid #333 !important;
-                box-shadow: none !important;
+                color: black !important;
             }
-        }
-
-        .success-animation {
-            animation: successPulse 2s ease-in-out infinite;
-        }
-
-        @keyframes successPulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.05); }
         }
     </style>
 </head>
-<body class="bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <!-- Header Success -->
-        <div class="text-center mb-8 no-print">
-            <div class="inline-block p-4 rounded-full bg-green-500 text-white mb-4 success-animation">
-                <i class="fas fa-check-circle text-4xl"></i>
-            </div>
-            <h1 class="text-3xl font-bold text-white mb-2">Inscrição Confirmada!</h1>
-            <p class="text-blue-100">Seu pagamento foi processado com sucesso</p>
+<body class="bg-gray-100">
+    <!-- Government Header -->
+    <header class="gov-header text-white py-2 no-print">
+        <div class="container mx-auto flex justify-between items-center px-4">
+            <a class="font-bold text-sm" href="#">
+                <img src="https://i.ibb.co/TDkn2RR4/Imagem-29-03-2025-a-s-17-32.jpg" alt="Logotipo do Brasil" class="h-6" />
+            </a>
+            <nav>
+                <ul class="flex space-x-4 text-[10px]">
+                    <li><a class="hover:underline" href="#">ACESSO À INFORMAÇÃO</a></li>
+                    <li><a class="hover:underline" href="#">PARTICIPE</a></li>
+                    <li><a class="hover:underline" href="#">SERVIÇOS</a></li>
+                </ul>
+            </nav>
         </div>
+    </header>
 
+    <!-- INEP Header -->
+    <div class="inep-header text-white py-4 no-print">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center">
+                <img src="https://i.ibb.co/TDkn2RR4/Imagem-29-03-2025-a-s-17-32.jpg" alt="INEP Logo" class="h-8 mr-4" />
+                <div>
+                    <h1 class="text-xl font-bold">ENCCEJA 2025</h1>
+                    <p class="text-sm opacity-90">Instituto Nacional de Estudos e Pesquisas Educacionais</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-4 py-6">
         <!-- Comprovante Card -->
         <div class="max-w-4xl mx-auto">
-            <div class="card rounded-2xl shadow-2xl p-8 mb-6">
+            <div class="bg-white shadow-lg p-8 mb-6">
                 <!-- Header do Comprovante -->
-                <div class="text-center mb-8">
-                    <div class="flex items-center justify-center mb-4">
-                        <div class="bg-blue-600 text-white p-3 rounded-full mr-4">
-                            <i class="fas fa-graduation-cap text-2xl"></i>
-                        </div>
-                        <div class="text-left">
-                            <h2 class="text-2xl font-bold text-gray-800">ENCCEJA 2025</h2>
-                            <p class="text-gray-600">Exame Nacional para Certificação de Competências</p>
-                        </div>
-                    </div>
-                    <div class="border-t border-gray-200 pt-4">
-                        <h3 class="text-xl font-semibold text-gray-800">COMPROVANTE DE INSCRIÇÃO</h3>
-                        <p class="text-gray-600">Nº da Inscrição: <span class="font-mono font-bold">{{ numero_inscricao }}</span></p>
+                <div class="form-header p-4 mb-6">
+                    <div class="text-center">
+                        <h2 class="text-xl font-bold">COMPROVANTE DE INSCRIÇÃO</h2>
+                        <p class="text-sm mt-1">ENCCEJA 2025 - Exame Nacional para Certificação de Competências de Jovens e Adultos</p>
+                        <p class="text-sm mt-2">Nº da Inscrição: <span class="font-mono font-bold">{{ numero_inscricao }}</span></p>
                     </div>
                 </div>
 
                 <!-- Informações do Candidato -->
-                <div class="grid md:grid-cols-2 gap-8 mb-8">
-                    <div class="space-y-6">
-                        <h4 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                            <i class="fas fa-user mr-2 text-blue-600"></i>
+                <div class="grid md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <h4 class="text-lg font-bold encceja-color border-b-2 border-gray-300 pb-2 mb-4">
                             Dados do Candidato
                         </h4>
                         
                         <div class="space-y-3">
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">Nome:</span>
-                                <span class="text-gray-900 font-semibold">{{ nome }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Nome Completo:</label>
+                                <p class="text-gray-900 font-semibold">{{ nome }}</p>
                             </div>
                             
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">CPF:</span>
-                                <span class="text-gray-900 font-mono">{{ cpf }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">CPF:</label>
+                                <p class="text-gray-900 font-mono">{{ cpf }}</p>
                             </div>
                             
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">Telefone:</span>
-                                <span class="text-gray-900">{{ telefone }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Telefone:</label>
+                                <p class="text-gray-900">{{ telefone }}</p>
                             </div>
                             
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">Email:</span>
-                                <span class="text-gray-900 text-sm">{{ email or 'Não informado' }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Email:</label>
+                                <p class="text-gray-900 text-sm">{{ email or 'Não informado' }}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div class="space-y-6">
-                        <h4 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                            <i class="fas fa-map-marker-alt mr-2 text-blue-600"></i>
-                            Endereço
+                    <div>
+                        <h4 class="text-lg font-bold encceja-color border-b-2 border-gray-300 pb-2 mb-4">
+                            Endereço Residencial
                         </h4>
                         
                         <div class="space-y-3">
-                            <div>
-                                <span class="font-medium text-gray-700">Logradouro:</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Logradouro:</label>
                                 <p class="text-gray-900">{{ endereco.logradouro }}, {{ endereco.numero }}</p>
                             </div>
                             
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">Bairro:</span>
-                                <span class="text-gray-900">{{ endereco.bairro }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Bairro:</label>
+                                <p class="text-gray-900">{{ endereco.bairro }}</p>
                             </div>
                             
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">Cidade/UF:</span>
-                                <span class="text-gray-900">{{ endereco.cidade }}/{{ endereco.uf }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Cidade/UF:</label>
+                                <p class="text-gray-900">{{ endereco.cidade }}/{{ endereco.uf }}</p>
                             </div>
                             
-                            <div class="flex justify-between">
-                                <span class="font-medium text-gray-700">CEP:</span>
-                                <span class="text-gray-900 font-mono">{{ endereco.cep }}</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">CEP:</label>
+                                <p class="text-gray-900 font-mono">{{ endereco.cep }}</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Informações da Prova -->
-                <div class="bg-blue-50 rounded-xl p-6 mb-8">
-                    <h4 class="text-lg font-semibold text-gray-800 mb-4">
-                        <i class="fas fa-calendar-alt mr-2 text-blue-600"></i>
+                <div class="bg-gray-50 border border-gray-300 p-6 mb-6">
+                    <h4 class="text-lg font-bold encceja-color border-b-2 border-gray-300 pb-2 mb-4">
                         Informações da Prova
                     </h4>
                     
-                    <div class="grid md:grid-cols-3 gap-4">
-                        <div class="text-center">
-                            <div class="bg-blue-600 text-white p-3 rounded-lg mb-2">
-                                <i class="fas fa-calendar text-xl"></i>
-                            </div>
-                            <p class="font-medium text-gray-700">Data da Prova</p>
-                            <p class="text-lg font-bold text-gray-900">{{ data_prova }}</p>
+                    <div class="grid md:grid-cols-3 gap-6">
+                        <div class="text-center border border-gray-200 p-4 bg-white">
+                            <p class="text-sm font-medium text-gray-600 mb-2">Data da Prova</p>
+                            <p class="text-xl font-bold encceja-color">{{ data_prova }}</p>
                         </div>
                         
-                        <div class="text-center">
-                            <div class="bg-blue-600 text-white p-3 rounded-lg mb-2">
-                                <i class="fas fa-clock text-xl"></i>
-                            </div>
-                            <p class="font-medium text-gray-700">Horário</p>
-                            <p class="text-lg font-bold text-gray-900">{{ horario_prova }}</p>
+                        <div class="text-center border border-gray-200 p-4 bg-white">
+                            <p class="text-sm font-medium text-gray-600 mb-2">Horário</p>
+                            <p class="text-xl font-bold encceja-color">{{ horario_prova }}</p>
                         </div>
                         
-                        <div class="text-center">
-                            <div class="bg-blue-600 text-white p-3 rounded-lg mb-2">
-                                <i class="fas fa-map-marked-alt text-xl"></i>
-                            </div>
-                            <p class="font-medium text-gray-700">Local</p>
+                        <div class="text-center border border-gray-200 p-4 bg-white">
+                            <p class="text-sm font-medium text-gray-600 mb-2">Local</p>
                             <p class="text-sm font-semibold text-gray-900">{{ local_prova }}</p>
                         </div>
                     </div>
                 </div>
 
                 <!-- Informações de Pagamento -->
-                <div class="bg-green-50 rounded-xl p-6 mb-8">
-                    <h4 class="text-lg font-semibold text-gray-800 mb-4">
-                        <i class="fas fa-credit-card mr-2 text-green-600"></i>
+                <div class="bg-gray-50 border border-gray-300 p-6 mb-6">
+                    <h4 class="text-lg font-bold encceja-color border-b-2 border-gray-300 pb-2 mb-4">
                         Comprovante de Pagamento
                     </h4>
                     
                     <div class="grid md:grid-cols-2 gap-6">
                         <div>
-                            <div class="flex justify-between mb-2">
-                                <span class="font-medium text-gray-700">Taxa de Inscrição:</span>
-                                <span class="text-xl font-bold text-green-600">R$ {{ "%.2f"|format(valor_pago) }}</span>
+                            <div class="border-b border-gray-200 pb-2 mb-3">
+                                <label class="text-sm font-medium text-gray-600">Taxa de Inscrição:</label>
+                                <p class="text-xl font-bold encceja-color">R$ {{ "%.2f"|format(valor_pago) }}</p>
                             </div>
                             
-                            <div class="flex justify-between mb-2">
-                                <span class="font-medium text-gray-700">Método:</span>
-                                <span class="text-gray-900">PIX</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">Método de Pagamento:</label>
+                                <p class="text-gray-900 font-semibold">PIX</p>
                             </div>
                         </div>
                         
                         <div>
-                            <div class="flex justify-between mb-2">
-                                <span class="font-medium text-gray-700">Data do Pagamento:</span>
-                                <span class="text-gray-900">{{ data_pagamento or 'Processando...' }}</span>
+                            <div class="border-b border-gray-200 pb-2 mb-3">
+                                <label class="text-sm font-medium text-gray-600">Data do Pagamento:</label>
+                                <p class="text-gray-900">{{ data_pagamento or 'Processando...' }}</p>
                             </div>
                             
-                            <div class="flex justify-between mb-2">
-                                <span class="font-medium text-gray-700">ID da Transação:</span>
-                                <span class="text-gray-900 font-mono text-sm">{{ transaction_id[:16] }}...</span>
+                            <div class="border-b border-gray-200 pb-2">
+                                <label class="text-sm font-medium text-gray-600">ID da Transação:</label>
+                                <p class="text-gray-900 font-mono text-sm">{{ transaction_id[:16] }}...</p>
                             </div>
                         </div>
                     </div>
                     
-                    <div class="mt-4 p-4 bg-white rounded-lg border border-green-200">
+                    <div class="mt-4 p-3 bg-white border border-gray-300">
                         <div class="flex items-center">
-                            <i class="fas fa-check-circle text-green-500 text-xl mr-3"></i>
-                            <span class="font-semibold text-green-700">Pagamento Confirmado</span>
+                            <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                            <span class="font-semibold text-gray-800">PAGAMENTO CONFIRMADO</span>
                         </div>
                     </div>
                 </div>
 
                 <!-- Instruções Importantes -->
-                <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-6">
-                    <h4 class="text-lg font-semibold text-gray-800 mb-3">
-                        <i class="fas fa-exclamation-triangle mr-2 text-yellow-600"></i>
+                <div class="bg-yellow-50 border border-yellow-400 p-6 mb-6">
+                    <h4 class="text-lg font-bold encceja-color border-b-2 border-gray-300 pb-2 mb-4">
                         Instruções Importantes
                     </h4>
                     
-                    <ul class="space-y-2 text-gray-700">
+                    <ul class="space-y-3 text-gray-700">
                         <li class="flex items-start">
-                            <i class="fas fa-check text-yellow-600 mt-1 mr-2 flex-shrink-0"></i>
+                            <span class="text-yellow-600 font-bold mr-2">•</span>
                             <span>Guarde este comprovante - será necessário no dia da prova</span>
                         </li>
                         <li class="flex items-start">
-                            <i class="fas fa-check text-yellow-600 mt-1 mr-2 flex-shrink-0"></i>
+                            <span class="text-yellow-600 font-bold mr-2">•</span>
                             <span>Chegue ao local de prova com 30 minutos de antecedência</span>
                         </li>
                         <li class="flex items-start">
-                            <i class="fas fa-check text-yellow-600 mt-1 mr-2 flex-shrink-0"></i>
+                            <span class="text-yellow-600 font-bold mr-2">•</span>
                             <span>Leve documento oficial com foto (RG, CNH ou Passaporte)</span>
                         </li>
                         <li class="flex items-start">
-                            <i class="fas fa-check text-yellow-600 mt-1 mr-2 flex-shrink-0"></i>
+                            <span class="text-yellow-600 font-bold mr-2">•</span>
                             <span>O local exato da prova será informado posteriormente por email</span>
                         </li>
                     </ul>
                 </div>
 
                 <!-- Footer -->
-                <div class="text-center text-gray-500 text-sm border-t border-gray-200 pt-6">
+                <div class="form-footer p-4 text-center text-sm">
                     <p>ENCCEJA 2025 - Exame Nacional para Certificação de Competências de Jovens e Adultos</p>
                     <p class="mt-1 current-datetime">Comprovante gerado em: [Data será inserida via JavaScript]</p>
                 </div>
             </div>
 
             <!-- Botões de Ação -->
-            <div class="flex flex-col sm:flex-row gap-4 justify-center no-print">
+            <div class="flex flex-col sm:flex-row gap-4 justify-center no-print mb-6">
                 <button onclick="window.print()" 
-                        class="print-button text-white px-8 py-4 rounded-xl font-semibold text-lg shadow-lg">
+                        class="form-footer text-white px-6 py-3 font-semibold">
                     <i class="fas fa-print mr-2"></i>
                     Imprimir Comprovante
                 </button>
                 
                 <button onclick="window.location.href='/'" 
-                        class="bg-white text-blue-600 px-8 py-4 rounded-xl font-semibold text-lg shadow-lg border-2 border-blue-200 hover:bg-blue-50 transition-all">
+                        class="bg-white encceja-color px-6 py-3 font-semibold border-2 border-gray-300 hover:bg-gray-50">
                     <i class="fas fa-home mr-2"></i>
                     Voltar ao Início
                 </button>
@@ -274,20 +265,35 @@
         </div>
     </div>
 
+    <!-- Footer -->
+    <footer class="footer-bg text-white py-4 text-xs no-print">
+        <div class="container mx-auto px-4">
+            <div class="flex flex-col items-center mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid" width="69" height="20" viewBox="0 0 69 20" class="h-16 w-auto mb-3">
+                    <defs><style>.cls-2{fill:#fff}</style></defs>
+                    <path d="M30 20h17v-5H35v-3h12V7H30v13zM50 0v5h19c0-2.47-2.108-5-5-5M50 20h6v-8h8c2.892 0 5-2.53 5-5H50v13zM22 0H9v5h18c-.386-4.118-4.107-5-5-5zm8 5h17V0H30v5zM0 20h6V7H0v13zm9 0h6V7H9v13zm12 0h6V7h-6v13zM0 5h6V0H0v5z" id="path-1" class="cls-2" fill-rule="evenodd"/>
+                </svg>
+                <p class="text-sm text-center mb-2">Instituto Nacional de Estudos e Pesquisas Educacionais</p>
+            </div>
+            <div class="flex justify-between items-center">
+                <div>© MEC - Ministério da Educação | INEP - Instituto Nacional de Estudos e Pesquisas</div>
+                <div class="flex items-center">
+                    <i class="fas fa-phone-alt mr-1"></i>
+                    0800 616161
+                </div>
+            </div>
+        </div>
+    </footer>
+
     <script>
         // Adicionar data e hora atual
         document.addEventListener('DOMContentLoaded', function() {
             const now = new Date();
-            const dateStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR');
+            const dateStr = 'Comprovante gerado em: ' + now.toLocaleDateString('pt-BR') + ' às ' + now.toLocaleTimeString('pt-BR');
             document.querySelectorAll('.current-datetime').forEach(el => {
                 el.textContent = dateStr;
             });
         });
-
-        // Efeito de sucesso
-        setTimeout(function() {
-            document.querySelector('.success-animation').classList.remove('success-animation');
-        }, 6000);
     </script>
 </body>
 </html>
