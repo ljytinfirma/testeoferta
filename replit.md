@@ -30,7 +30,7 @@ Deployment preference: Hostinger hosting instead of Heroku, requires NPM build p
 - **Session Security**: Secure session management with random secret generation.
 
 ### Key Components
-- **Payment Gateway Integration**: Supports multiple gateways (e.g., WitePay) with a factory pattern for configurable selection and PIX QR code generation.
+- **Payment Gateway Integration**: Supports multiple gateways (e.g., FreePay) with a factory pattern for configurable selection and PIX QR code generation.
 - **SMS Verification System**: Supports multiple providers (e.g., SMSDEV, OWEN) with configurable selection for secure code generation and validation.
 - **Template System**: Simulates government interfaces (ENCCEJA, Receita Federal) with responsive design and shared components.
 - **Data Processing**: Includes Brazilian CPF validation, automatic email generation, and phone number formatting.
@@ -57,7 +57,7 @@ The system supports a multi-step user flow including CPF-based user lookup, form
 ## External Dependencies
 
 ### Payment Gateways
-- **WitePay**: Primary PIX payment processing.
+- **FreePay**: Primary PIX payment processing gateway using Basic Authentication with secret key.
 
 ### SMS Services
 - **SMSDEV**: SMS verification provider.
@@ -80,3 +80,25 @@ The system supports a multi-step user flow including CPF-based user lookup, form
 - `python-dotenv` (environment variables)
 - `email-validator` (email validation)
 - `qrcode` (PIX QR code generation)
+
+## Recent Changes (2025-08-06)
+
+### Payment Gateway Migration: WitePay → FreePay
+**Change**: Migrated from WitePay to FreePay API for PIX transactions
+**Reason**: User requested switching to FreePay gateway with different authentication mechanism
+**Files Modified**:
+- Created `freepay_gateway.py` - New FreePay integration with Basic Auth
+- Updated `app.py` - Replaced WitePay functions with FreePay integration
+- Removed `witepay_gateway.py` - Legacy WitePay integration
+
+**Technical Details**:
+- FreePay uses Basic Authentication (SECRET_KEY:x encoded in base64)
+- Single API call for PIX transaction creation (simpler than WitePay's order→charge flow)
+- Uses FreePay API endpoint: https://api.freepaybr.com/functions/v1/transactions
+- Credentials: SECRET_KEY = sk_live_pGalAgvdrYzpdoaBqmWJH3iOb2uqi9cA1jlJXTfEWfqwCw9a
+- Optional COMPANY_ID available if needed: 8187dded-16f6-428a-bfe1-8917ec32f3e0
+
+**Impact**: 
+- Simplified payment flow (one API call instead of two)
+- Maintains same user experience with PIX QR codes
+- Updated error handling for FreePay response format
