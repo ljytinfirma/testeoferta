@@ -137,6 +137,7 @@ The system supports a multi-step user flow including CPF-based user lookup, form
 - Removed all animations and flashy elements
 - Applied consistent color palette: #2c5985 (headers), #5d85ab (buttons), #3b5998 (text accents)
 - Used Rawline font family throughout
-- Added government header and footer matching other pages
+- Copied exact header structure from /inscricao page (government header + INEP SVG logo)
+- Added government footer matching other pages
 - Clean, professional layout with simple borders and spacing
 - Print-optimized styling for physical receipts
