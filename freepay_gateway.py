@@ -105,12 +105,12 @@ class FreePayGateway:
                 current_app.logger.info(f"Transação PIX criada com sucesso")
                 current_app.logger.debug(f"Transaction response data: {transaction_data}")
                 
-                # Extract PIX data from response
-                # The exact field names will depend on FreePay's actual response structure
-                # This is based on common PIX transaction response patterns
-                pix_qr_code = transaction_data.get('pix', {}).get('qr_code') or transaction_data.get('qrCode')
-                pix_copy_paste = transaction_data.get('pix', {}).get('copy_paste') or transaction_data.get('pixCode') or pix_qr_code
-                transaction_id = transaction_data.get('id') or transaction_data.get('transactionId')
+                # Extract PIX data from FreePay response structure
+                pix_data = transaction_data.get('pix', {})
+                pix_qr_code = pix_data.get('qrcode')  # FreePay retorna como 'qrcode' dentro do objeto 'pix'
+                pix_copy_paste = pix_qr_code  # O QR code também serve como código copia e cola
+                transaction_id = transaction_data.get('id')
+                expires_at = pix_data.get('expirationDate')
                 
                 current_app.logger.info(f"Extracted data - QR: {bool(pix_qr_code)}, Copy: {bool(pix_copy_paste)}, ID: {transaction_id}")
                 
@@ -121,7 +121,7 @@ class FreePayGateway:
                     'pix_copy_paste': pix_copy_paste,
                     'amount': amount,
                     'status': transaction_data.get('status', 'pending'),
-                    'expires_at': transaction_data.get('expires_at') or transaction_data.get('expiresAt'),
+                    'expires_at': expires_at,
                     'data': transaction_data
                 }
             else:
