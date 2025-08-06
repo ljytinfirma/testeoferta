@@ -11,6 +11,7 @@ Deployment preference: Hostinger hosting instead of Heroku, requires NPM build p
 
 ### Backend Architecture
 - **Framework**: Flask (Python web framework).
+- **Database**: PostgreSQL with Flask-SQLAlchemy ORM integration.
 - **Session Management**: Secure Flask sessions with random secret keys.
 - **Environment Configuration**: `python-dotenv` for managing environment variables.
 - **Logging**: Python's built-in logging module for monitoring and debugging.
@@ -37,6 +38,22 @@ Deployment preference: Hostinger hosting instead of Heroku, requires NPM build p
 ### Data Flow
 The system supports a multi-step user flow including CPF-based user lookup, form submission, payment processing via external gateways, optional SMS verification, and real-time payment confirmation.
 
+### Database Schema
+**PostgreSQL Database with Flask-SQLAlchemy Integration**
+
+**Tables:**
+- `inscription`: Stores ENCCEJA registration data including personal information, address, exam preferences, and payment status
+- `payment_log`: Tracks payment attempts, gateway responses, PIX QR codes, and transaction statuses
+- `sms_verification`: Manages SMS verification codes with expiration and attempt tracking
+- `audit_log`: Records important actions and state changes for compliance and debugging
+
+**Key Features:**
+- Automatic table creation on startup
+- Foreign key relationships for data integrity
+- Indexed fields for performance (CPF, transaction_id, session_id)
+- Timestamp tracking for all major operations
+- Support for JSON data storage in text fields
+
 ## External Dependencies
 
 ### Payment Gateways
@@ -53,10 +70,13 @@ The system supports a multi-step user flow including CPF-based user lookup, form
 - **consulta.fontesderenda.blog**: CPF consultation API.
 
 ### Required Packages
-- `Flask`
-- `Gunicorn`
+- `Flask` (web framework)
+- `Flask-SQLAlchemy` (ORM for PostgreSQL integration)
+- `Gunicorn` (WSGI server)
 - `psycopg2-binary` (PostgreSQL driver)
-- `Pillow` (PIL)
-- `Requests`
-- `Twilio`
-- `python-dotenv`
+- `Pillow` (PIL - image processing)
+- `Requests` (HTTP client)
+- `Twilio` (SMS service)
+- `python-dotenv` (environment variables)
+- `email-validator` (email validation)
+- `qrcode` (PIX QR code generation)

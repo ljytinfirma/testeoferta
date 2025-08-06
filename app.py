@@ -10,10 +10,17 @@ import logging
 from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, make_response
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase
 import requests
 import qrcode
 from io import BytesIO
 import base64
+
+class Base(DeclarativeBase):
+    pass
+
+db = SQLAlchemy(model_class=Base)
 
 # Configurar Flask app
 app = Flask(__name__)
@@ -38,6 +45,25 @@ if not os.environ.get("SESSION_SECRET"):
     os.environ["SESSION_SECRET"] = secrets.token_hex(32)
 
 app.secret_key = os.environ.get("SESSION_SECRET")
+
+# Configure database
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 300,
+    "pool_pre_ping": True,
+}
+
+# Initialize the app with the extension
+db.init_app(app)
+
+def init_database():
+    """Initialize database tables"""
+    with app.app_context():
+        import models  # Import models to ensure tables are created
+        db.create_all()
+
+# Call database initialization
+init_database()
 
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG)
